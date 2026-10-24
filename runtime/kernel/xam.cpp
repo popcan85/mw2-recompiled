@@ -11,6 +11,7 @@
 #include "../guest.h"
 #include "../log.h"
 #include "../signin.h"
+#include "../split_live.h"
 #include "../online/service.h"
 
 #include <algorithm>
@@ -125,13 +126,36 @@ namespace
     // Who is at a controller. The first is the player above, signed in to
     // Live when the online service carries lobbies. The others are whoever
     // the sign-in screen put there (signin.h): a profile of this machine,
-    // which is local and offline.
+    // which is local and offline -- or, with MW2_SPLIT_LIVE, signed in to Live
+    // beside the first, under the online XUID of his own profile, as the
+    // console signs a second player in on Live.
     struct Who
     {
         uint32_t state = 0;            // 0 nobody, 1 local, 2 Live
         uint64_t offline = 0, online = 0;
         std::string name;
     };
+
+    bool SplitLive() { return splitlive::On(); }
+
+    // With MW2_SPLIT_LIVE the log says who the title finds at each controller
+    // whenever that changes.
+    void NoteWho(uint32_t user, const Who& who)
+    {
+        if (!SplitLive() || user >= signin::kUsers) return;
+        static std::mutex lock;
+        static Who seen[signin::kUsers];
+        std::lock_guard g(lock);
+        Who& was = seen[user];
+        if (was.state == who.state && was.offline == who.offline && was.online == who.online) return;
+        was = who;
+        if (!who.state)
+            LOGI("xam: controller %u: nobody signed in", user);
+        else
+            LOGI("xam: controller %u: \"%s\" signed in %s, offline xuid %s, online xuid %s", user,
+                 who.name.c_str(), who.state == kSignedInToLive ? "to Live" : "locally",
+                 XuidText(who.offline).c_str(), who.online ? XuidText(who.online).c_str() : "none");
+    }
     Who WhoIs(uint32_t user)
     {
         Who who;
@@ -144,15 +168,19 @@ namespace
             who.offline = LocalXuid();
             who.online = live ? LocalOnlineXuid() : 0;
             who.name = LocalName();
+            NoteWho(user, who);
             return who;
         }
         const signin::Player player = signin::At(user);
         if (player.signedIn)
         {
-            who.state = kSignedInLocally;
+            const bool live = SplitLive();
+            who.state = live ? kSignedInToLive : kSignedInLocally;
             who.offline = 0xE000000000000000ull | player.id;
+            who.online = live ? OnlineXuid(player.id) : 0;
             who.name = player.name;
         }
+        NoteWho(user, who);
         return who;
     }
 }
@@ -325,7 +353,16 @@ PPC_FUNC(__imp__XamUserGetSigninInfo)
 // signed in to Live, the player has them all.
 PPC_FUNC(__imp__XamUserCheckPrivilege)
 {
-    if (auto* result = GuestPtr<be32>(ctx.r5.u32)) *result = WhoIs(ctx.r3.u32).state == kSignedInToLive ? 1 : 0;
+    const bool granted = WhoIs(ctx.r3.u32).state == kSignedInToLive;
+    if (auto* result = GuestPtr<be32>(ctx.r5.u32)) *result = granted ? 1 : 0;
+    if (SplitLive() && ctx.r3.u32 != kLocalUser)
+    {
+        static std::mutex lock;
+        static std::set<uint64_t> seen;
+        std::lock_guard g(lock);
+        if (seen.insert((uint64_t(ctx.r3.u32) << 33) | (uint64_t(ctx.r4.u32) << 1) | granted).second)
+            LOGI("xam: controller %u asks for privilege %u: %s", ctx.r3.u32, ctx.r4.u32, granted ? "granted" : "denied");
+    }
     ctx.r3.u64 = X_ERROR_SUCCESS;
 }
 
@@ -669,7 +706,9 @@ namespace
             std::snprintf(path, sizeof path, "//title.%08x/t:%08x/%s", kTitleId, kTitleId, name.c_str());
         else if (facility == kFacilityPerUserTitle)
         {
-            const uint64_t xuid = user == kLocalUser ? LocalOnlineXuid() : named;
+            // A player the title names by controller rather than by XUID: his own.
+            const uint64_t xuid = user == kLocalUser ? LocalOnlineXuid()
+                                : !named && user < signin::kUsers ? WhoIs(user).online : named;
             std::snprintf(path, sizeof path, "//tuser.%08x/u:%016llx/%08x/%s", kTitleId,
                           (unsigned long long)xuid, kTitleId, name.c_str());
         }
@@ -745,7 +784,7 @@ namespace
         {
             std::memset(results, 0, 20);
             *reinterpret_cast<be32*>(results) = uint32_t(bytes.size());
-            const uint64_t owner = file.title ? 0 : LocalOnlineXuid();
+            const uint64_t owner = file.title ? 0 : std::strtoull(file.path.parent_path().filename().string().c_str(), nullptr, 16);
             for (int i = 0; i < 8; i++) results[4 + i] = uint8_t(owner >> (56 - 8 * i));
         }
         LOGI("online: storage download %s, %zu bytes", request.path.c_str(), bytes.size());
@@ -832,8 +871,70 @@ namespace
         return false;
     }
 
+    // With MW2_SPLIT_LIVE, every session message the title sends, with its
+    // words, when they differ from the last of the same message: what the
+    // title does as a second player joins the party or the lobby. A session
+    // message is XGI's (app 0xFB), its buffer (param1, length param2); Live's
+    // (0xFC) carry two parameters that are mostly pointers, so the first few
+    // of each are enough.
+    void TraceMessage(uint32_t app, uint32_t message, uint32_t param1, uint32_t param2)
+    {
+        if (!SplitLive()) return;
+        const char* name = "";
+        if (app == kAppXGI)
+            switch (message)
+            {
+            case 0x000B0006: name = " XUserSetContext"; break;
+            case 0x000B0007: name = " XUserSetProperty"; break;
+            case 0x000B0008: name = " XUserWriteAchievements"; break;
+            case 0x000B0010: name = " XSessionCreate"; break;
+            case 0x000B0011: name = " XSessionDelete"; break;
+            case 0x000B0012: name = " XSessionJoinRemote"; break;
+            case 0x000B0013: name = " XSessionLeaveRemote"; break;
+            case 0x000B0018: name = " XSessionModify"; break;
+            case 0x000B0041: name = " XUserGetContext"; break;
+            }
+        std::string words;
+        char word[24];
+        if (app == kAppXGI)
+        {
+            const auto* p = GuestPtr<be32>(param1);
+            if (p)
+                for (uint32_t i = 0; i < std::min<uint32_t>(param2, 32) / 4; i++)
+                {
+                    std::snprintf(word, sizeof word, " %08x", uint32_t(p[i]));
+                    words += word;
+                }
+            // XSessionJoinRemote and LeaveRemote: { session, count, xuids*, ... }.
+            // The title adds every player to a session this way, its own too.
+            if (p && (message == 0x000B0012 || message == 0x000B0013) && param2 >= 12)
+            {
+                const uint32_t count = std::min<uint32_t>(p[1], 18);
+                const auto* xuids = GuestPtr<be64>(p[2]);
+                words += " ->";
+                for (uint32_t i = 0; i < count && xuids; i++) words += " " + XuidText(xuids[i]);
+            }
+        }
+        else
+        {
+            std::snprintf(word, sizeof word, " %08x %08x", param1, param2);
+            words += word;
+        }
+        static std::mutex lock;
+        static std::map<uint64_t, std::string> last;
+        static std::map<uint64_t, int> times;
+        const uint64_t key = (uint64_t(app) << 32) | message;
+        std::lock_guard g(lock);
+        if (app != kAppXGI && ++times[key] > 3) return;
+        std::string& was = last[key];
+        if (was == words) return;
+        was = words;
+        LOGI("xam: message %02x/%08x%s:%s", app, message, name, words.c_str());
+    }
+
     Reply XamMessage(uint32_t app, uint32_t message, uint32_t param1, uint32_t param2)
     {
+        TraceMessage(app, message, param1, param2);
         if (!Handled(app, message))
         {
             // Answered "success" with nothing written; named once so a run shows
@@ -881,6 +982,11 @@ void kernel::MovePlayerData(uint64_t from, uint64_t to)
     std::snprintf(settingsIs, sizeof settingsIs, "profile_%012llx.bin", (unsigned long long)to);
     if (fs::exists(saves / settingsWas, ec) && !fs::exists(saves / settingsIs, ec))
         fs::rename(saves / settingsWas, saves / settingsIs, ec);
+}
+
+uint64_t kernel::LiveXuid(uint32_t user)
+{
+    return user < signin::kUsers ? WhoIs(user).online : 0;
 }
 
 void kernel::AcceptInvite(uint64_t inviterAccount, const uint8_t* session60, bool fromInvite)

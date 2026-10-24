@@ -9,6 +9,7 @@
 #include "../online/service.h"
 #include "../player.h"
 #include "../signin.h"
+#include "../split_live.h"
 #include "../stutters.h"
 #include "../gpu/vulkan/renderer.h"
 
@@ -303,6 +304,7 @@ PPC_FUNC(__imp__XamInputGetState)
     // the cheapest place to hand the engine a scripted console command.
     online::Frame();
     console::Pump(ctx, base);
+    splitlive::Frame(ctx, base);
 
     uint32_t user  = ctx.r3.u32;
     uint32_t sAddr = ctx.r5.u32;
@@ -398,6 +400,7 @@ PPC_FUNC(__imp__XamInputGetState)
             triggers[0] = triggers[1] = 0;
             axes[0] = axes[1] = axes[2] = axes[3] = 0;
         }
+        splitlive::Input(user, b);
 
         Latch& latch = g_latch[user];
         const bool changed = latch.buttons != b ||

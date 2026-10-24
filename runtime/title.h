@@ -278,6 +278,47 @@
 // handshake talks to and, in the game netchan, the address it was set up with.
 #define T_DATA_ClientConnState    0x825A6460u
 #define T_CONN_STATE_STRIDE       3216u
+// Split screen's controllers (split_live.cpp): the record above starts with
+// whether the client is active; cl_multi_gamepads_enabled, an int, clear for
+// the primary controller alone to reach the first client (sub_821AB900);
+// each controller's local client, -1 for none; and the command runner the
+// menus' makeLocalClientActive goes through, (localClientNum, controller, text).
+#define T_DATA_ClientUIActive     0x825A5918u
+#define T_DATA_MultiGamepads      0x82442290u
+#define T_DATA_ControllerClient   0x825B7F70u
+#define T_DATA_PrimaryController  0x825B7F80u
+#define T_Cmd_ExecuteSingleCommand 82277928
+// The local clients' setup (sub_82188A58, run as a game is joined or hosted):
+// with the `splitscreen` dvar set it makes four local clients, each keeping
+// four players a snapshot, and one keeping eighteen otherwise. How many there
+// are is kept in T_DATA_LocalClientCount; a local client (T_DATA_LocalClients)
+// keeps its snapshot count at +27500, its players-a-snapshot room at +27512
+// and their array at +27528, 148 bytes a player. The setup allocates with
+// sub_82312FF8(size, 4, 4) and clears with memset. While a server runs here
+// (sv_running) it makes none and puts back the dvars it was made for instead.
+// It also sizes the server's hunk (sub_822BF890), which reads `splitscreen`
+// as well: four clients' room when set, sv_maxclients' otherwise.
+#define T_CL_InitLocalClients     82188A58
+// Session_RegisterUser(controller, session, xuid, private, slot, natType, ?,
+// address, stack: one more) puts a player in one of a session's 18 slots
+// ("Registering xuid %llx at slot %i ..."), which is where SV_DirectConnect
+// looks a connecting player up (Session_FindRegisteredUser). A slot is 48
+// bytes from session+568: in use at +0, the xuid at +8.
+#define T_Session_RegisterUser    823945D8
+#define T_SESSION_USERS           568u
+#define T_SESSION_USER_SIZE       48u
+#define T_SESSION_USER_XUID       8u
+#define T_SESSION_SLOTS           18u
+#define T_SV_InitHunk             822BF890
+#define T_DATA_SvRunningDvar      0x830F08E4u   // pointer to the dvar, a bool at +12
+#define T_Hunk_Alloc              82312FF8
+#define T_memset                  8241A890
+#define T_DATA_SplitscreenDvar    0x825A8B74u   // pointer to the dvar, a bool at +12
+#define T_DATA_LocalClientCount   0x82508A38u
+#define T_LOCAL_CLIENT_SNAPSHOTS  27500u
+#define T_LOCAL_CLIENT_PARSE_ROOM 27512u
+#define T_LOCAL_CLIENT_PARSE      27528u
+#define T_PARSE_CLIENT_SIZE       148u
 #define T_DATA_ClientConnections  0x82508990u
 #define T_CONNECTION_STRIDE       0x00051568u
 #define T_CONNECTION_SERVER_ADR   16u

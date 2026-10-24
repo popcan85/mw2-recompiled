@@ -238,6 +238,38 @@ title asks:
 | XUID | online `0x0009` over the account's low 48 bits; offline `0xE0...` over the same bits | offline `0xE0...` |
 | privileges | all granted | all denied |
 
+### Split screen on Xbox LIVE
+
+The title's split screen is offline: choosing Xbox LIVE sets `splitscreen 0`,
+reads the primary controller alone and makes one local client. The engine is
+the split-screen one underneath -- four local clients, each with a connection
+of its own, which `CL_ConnectFromParty` connects one by one -- and
+`MW2_SPLIT_LIVE=1` (`runtime/split_live.cpp`) puts a second to fourth player
+of this machine in an Xbox LIVE party and match through it:
+
+- The players the sign-in screen puts at the second to fourth controllers are
+  signed in to Live, each under his own profile's XUIDs (`0x0009` and
+  `0xE0...` over its digits), with the privileges of the first.
+- Holding Back for a second at such a controller runs the split-screen menu's
+  own `makeLocalClientActive` as that controller, with every controller routed
+  to its own client (`cl_multi_gamepads_enabled`). Holding it again runs
+  `makeLocalClientInactive`.
+- The local clients' setup reads `splitscreen` from a copy of the dvar that
+  says set, and makes four; the real dvar is untouched, and the server's hunk,
+  sized in the same setup, reads the real one (sv_maxclients' room). Each
+  client is given the online room of 18 players a snapshot.
+- The server lets a player in only when a session holds his XUID, and the
+  title registers one player a machine. Whenever it registers this machine's
+  first player in a session (`Session_RegisterUser`), the other active local
+  players are registered there too, in free slots; a player made active later
+  is registered in the sessions the first is already in.
+
+Two players on one machine then play a private match it hosts, in the
+title's own split screen. The log names who is at each controller, the
+controllers' routing, the active clients and their connection states as they
+change, each registration, and every session message with its words
+(`XSessionJoinRemote` lists the XUIDs it adds).
+
 Signed in, every new notification listener for the Live area hears
 `XN_LIVE_CONNECTIONCHANGED` (connection established), since the connection came
 up before the title was listening. `XOnlineGetNatType` reports an open NAT.
@@ -282,6 +314,7 @@ refuses as signed out.
 | `MW2_LAN_ADDRESS=<address>\|first` | lan: the address announced, instead of the one chosen |
 | `MW2_LAN_JOIN=<name>` | lan: join that player's party or lobby when seen |
 | `MW2_LAN_ACCEPT=1` | lan: accept invitations |
+| `MW2_SPLIT_LIVE=1` | the second to fourth controllers' players signed in to Live too |
 | `MW2_STEAMCLIENT=<path>` | steam: the client library to load |
 | `MW2_STEAM_APPID` | steam: the app id to run as (480) |
 | `MW2_TRACE_ONLINE=1` | log every datagram (diagnostic builds) |

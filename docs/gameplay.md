@@ -156,8 +156,9 @@ LINK. The Guide button opens it too, as on the console, or Back and Start
 together where the system keeps that button.
 
 The console's screen also signs a guest in beside a player on Live. This one
-does not: the title's split screen is offline only, and its system link takes
-one player a copy.
+does not, and the players it signs in are local: offline. `MW2_SPLIT_LIVE=1`
+signs them in to Live instead, under their own profiles
+([multiplayer.md](multiplayer.md#xbox-live-private-matches)).
 
 It lists the profiles of this machine that are not already playing, and "New
 profile", which makes "Player 2" or the next free number. A profile is signed in

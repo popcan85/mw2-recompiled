@@ -82,6 +82,8 @@ namespace kernel
     // An accepted Xbox LIVE invitation: XInviteGetAcceptedInfo reports it from
     // here on, and the title is told it arrived.
     void AcceptInvite(uint64_t inviterAccount, const uint8_t* session60, bool fromInvite);
+    // The online XUID of the player signed in to Live at a controller, or 0.
+    uint64_t LiveXuid(uint32_t user);
 
     // Content packages -- saved games. The title mounts one as a lettered drive
     // ("save0:") and then opens "save0:\savegame.svg" through the ordinary file

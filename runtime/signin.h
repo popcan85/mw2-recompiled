@@ -16,8 +16,9 @@
 // The console signs a profile in at each controller through its own sign-in
 // screen, which a title asks for (XamShowSigninUI) and never draws. This is
 // that screen: the profiles of this machine (saves/profiles.txt), a new one,
-// or nobody. The console's also signs a guest in beside a player on Live,
-// which this title has no use for: its split screen is offline. Nothing is
+// or nobody. The console's also signs a guest in beside a player on Live;
+// this one signs in local profiles, which XAM puts on Live only with
+// MW2_SPLIT_LIVE (kernel/xam.cpp). Nothing is
 // remembered between runs: every controller but the first starts signed
 // out, and the first's is not chosen on this screen.
 //
