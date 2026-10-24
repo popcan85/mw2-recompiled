@@ -48,6 +48,10 @@ namespace signin
 
     // The title asks for the screen: it opens for the controller pressed last.
     void Ask();
+    // The screen for this controller (the second to the fourth), and whether
+    // it is open.
+    void AskFor(uint32_t user);
+    bool Open();
 
     // What a controller holds, at every read of it (XINPUT_GAMEPAD buttons,
     // a stick pushed up or down counted as the d-pad, and kGuide). True when

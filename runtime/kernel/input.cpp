@@ -400,7 +400,7 @@ PPC_FUNC(__imp__XamInputGetState)
             triggers[0] = triggers[1] = 0;
             axes[0] = axes[1] = axes[2] = axes[3] = 0;
         }
-        splitlive::Input(user, b);
+        b &= uint16_t(~splitlive::Input(user, b));
 
         Latch& latch = g_latch[user];
         const bool changed = latch.buttons != b ||

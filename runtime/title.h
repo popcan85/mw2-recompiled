@@ -287,6 +287,7 @@
 #define T_DATA_MultiGamepads      0x82442290u
 #define T_DATA_ControllerClient   0x825B7F70u
 #define T_DATA_PrimaryController  0x825B7F80u
+#define T_DATA_MenuController     0x825B7F84u   // the controller the menus' commands run as
 #define T_Cmd_ExecuteSingleCommand 82277928
 // The local clients' setup (sub_82188A58, run as a game is joined or hosted):
 // with the `splitscreen` dvar set it makes four local clients, each keeping
@@ -308,13 +309,42 @@
 #define T_SESSION_USERS           568u
 #define T_SESSION_USER_SIZE       48u
 #define T_SESSION_USER_XUID       8u
+#define T_SESSION_USER_ADDRESS    20u   // the player's netadr, 12 bytes
 #define T_SESSION_SLOTS           18u
+#define T_SESSION_PRIVATE         552u  // the slot counts
+#define T_SESSION_PUBLIC          556u
+// The two parties (Party_StopParty's partyId 0 and 1), each keeping its
+// session at +0, 18 members of 192 bytes from +64 (a member's slot is his
+// session slot), this machine's member at +5200 and whether it hosts at
+// +5340. A member: status at +0 (3 and up in the party), name at +2 (32),
+// clan tag at +34, 8 bytes of his machine's at +108, the xuid at +176; the
+// rest is what PartyHost_AddPlayerAtSlot (party, slot, address, &xuid, &8
+// bytes, name, clan tag; on the stack his details) puts there. PartyHost_
+// RemoveMember(party, slot, tell him, reason) takes one out, and PartyHost_
+// StartParty(party, controller, ...) starts one this machine hosts.
+#define T_DATA_Party0             0x825B2978u
+#define T_DATA_Party1             0x825B5C18u
+#define T_PARTY_MEMBERS           64u
+#define T_PARTY_MEMBER_SIZE       192u
+#define T_PARTY_ME                5200u
+#define T_PARTY_HOSTING           5340u
+#define T_MEMBER_NAME             2u
+#define T_MEMBER_CLANTAG          34u
+#define T_MEMBER_MACHINE          108u
+#define T_MEMBER_XUID             176u
+#define T_PartyHost_AddPlayerAtSlot 821A6048
+#define T_PartyHost_RemoveMember  821A46E0
+#define T_PartyHost_StartParty    821A2B28
+// The member at an address: Party_FindMemberByAddr(party, address, from
+// member), the first there from that member on, which two wrappers ask from
+// member 0 (sub_8219C8E8, sub_8219C918).
+#define T_Party_FindMemberByAddr  8219C818
 #define T_SV_InitHunk             822BF890
 #define T_DATA_SvRunningDvar      0x830F08E4u   // pointer to the dvar, a bool at +12
 #define T_Hunk_Alloc              82312FF8
 #define T_memset                  8241A890
 #define T_DATA_SplitscreenDvar    0x825A8B74u   // pointer to the dvar, a bool at +12
-#define T_DATA_LocalClientCount   0x82508A38u
+#define T_DATA_LocalClientCount   0x825089C8u
 #define T_LOCAL_CLIENT_SNAPSHOTS  27500u
 #define T_LOCAL_CLIENT_PARSE_ROOM 27512u
 #define T_LOCAL_CLIENT_PARSE      27528u

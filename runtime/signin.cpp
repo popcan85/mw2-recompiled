@@ -302,6 +302,14 @@ void signin::Ask()
     OpenLocked(g_pressedLast);
 }
 
+void signin::AskFor(uint32_t user)
+{
+    std::lock_guard lock(g_lock);
+    OpenLocked(user);
+}
+
+bool signin::Open() { return g_open; }
+
 bool signin::Input(uint32_t user, uint16_t buttons)
 {
     if (user >= kUsers) return false;

@@ -250,19 +250,26 @@ of this machine in an Xbox LIVE party and match through it:
 - The players the sign-in screen puts at the second to fourth controllers are
   signed in to Live, each under his own profile's XUIDs (`0x0009` and
   `0xE0...` over its digits), with the privileges of the first.
-- Holding Back for a second at such a controller runs the split-screen menu's
-  own `makeLocalClientActive` as that controller, with every controller routed
-  to its own client (`cl_multi_gamepads_enabled`). Holding it again runs
-  `makeLocalClientInactive`.
+- In the Xbox LIVE lobby this machine hosts, START at such a controller joins:
+  the sign-in screen opens first if nobody is signed in there, and choosing a
+  profile joins. Joining runs the split-screen menu's own
+  `makeLocalClientActive` as that controller, with every controller routed to
+  its own client (`cl_multi_gamepads_enabled`). Holding Back for two seconds,
+  or signing out, leaves (`makeLocalClientInactive`).
+- A player who joins is added to the parties this machine hosts as the host
+  adds a machine that joins (`PartyHost_AddPlayerAtSlot`): this machine's
+  address, his own name and XUID, the first player's other details. The lobby
+  lists him, other machines are sent him with the party, and the party's
+  session registers him. The title's party already knows a member may be
+  local: its timeout spares one whose XUID is signed in on this machine.
 - The local clients' setup reads `splitscreen` from a copy of the dvar that
   says set, and makes four; the real dvar is untouched, and the server's hunk,
   sized in the same setup, reads the real one (sv_maxclients' room). Each
   client is given the online room of 18 players a snapshot.
-- The server lets a player in only when a session holds his XUID, and the
-  title registers one player a machine. Whenever it registers this machine's
-  first player in a session (`Session_RegisterUser`), the other active local
-  players are registered there too, in free slots; a player made active later
-  is registered in the sessions the first is already in.
+- The server lets a player in only when a session holds his XUID. The party's
+  session has him as a member; any other session the first player is
+  registered in (`Session_RegisterUser`) gets the other active local players
+  registered beside him, in free slots.
 
 Two players on one machine then play a private match it hosts, in the
 title's own split screen. The log names who is at each controller, the

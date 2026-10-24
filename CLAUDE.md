@@ -56,14 +56,27 @@ system-link split-screen; report approach, risks, odds.
   and Tailscale up on PC1 (invitee needs `MW2_LAN_ACCEPT=1`). DONE.
 - Stage 2 (in progress, `runtime/split_live.cpp`, docs/multiplayer.md "Split screen on
   Xbox LIVE"): MW2 itself has no online split screen (Live sets splitscreen 0, 1 local
-  client, 1 player registered per machine). Native route works on ONE PC: controller 2
-  signs in (Guide), holds Back 1 s in the lobby -> makeLocalClientActive; 4 local clients
-  made online; player 2 registered in player 1's sessions -> 2 players in a hosted private
-  match, split screen, both playable (user confirmed). Builds: `builds\stage2c-diagnostic\`
-  (diagnostic, MW2_ENGINE_LOG=1), `builds\stage2b-split-native\` (release).
-  Open: local-client count reads 0 in the setup log (check the 18-player widening ran);
-  lobby list shows player 1 only; joining from PC2 with 2 players (party join carries one
-  player a machine); Back toggles (2nd hold deactivates).
+  client, 1 party member/registration per machine). Native route on ONE PC works and the
+  user confirmed it: in the Xbox LIVE lobby this PC hosts, START on controller 2 joins
+  (sign-in screen first if needed; join waits 1.5 s for the profile), Back held 2 s leaves;
+  4 local clients made online (copy of the splitscreen dvar), 18-player snapshot room;
+  player 2 added to both hosted parties with PartyHost_AddPlayerAtSlot (shows in lobby);
+  Party_FindMemberByAddr skips this PC's extra players; menus kept on controller 0 and
+  only joined clients active (the game's sign-in handler makes the new controller primary
+  and every client active); START that joins is hidden until released. Private match:
+  split screen, both playable, player 2's name right in game.
+  Build for testing: `builds\stage2c-diagnostic\` (diagnostic: MW2_ENGINE_LOG=1, LOG_TIME).
+  OPEN, next session:
+  1. Lobby name flips "Player 2" -> "Reido" ~40 ms after player 2 joins the lobby party
+     (party 825B5C18, his slot 0, host slot 7), right after "Session Join completed" for
+     him in gameSession. Suspect the join-complete callback sub_823915C0 -> sub_821A6578
+     (refreshes the host's member with sub_821A44A0 and syncs linked party +5464 members).
+     Find the writer: hook T_I_strncpyz / AddPlayerAtSlot and log writes to member+2 with
+     the caller's LR (watchpoint.cpp is Linux-only).
+  2. Rank/details of player 2 are copied from player 1; sub_821A44A0(party, controller,
+     slot) fills a member from a controller's own profile, but also writes party+5368.
+  3. Joining from PC2 with 2 players (joinParty carries one player a machine).
+  4. Release build + test kit for both PCs; docs for the final UX; push at stage end.
 - Never propose one game copy per player: the user wants native split screen only.
 - Diagnostic Windows builds needed `pthread` linked on Windows (clock_gettime).
 - New test builds can reuse an installed `game\` folder (junctions to stage0-stock);

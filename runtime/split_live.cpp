@@ -22,13 +22,33 @@
 // online room of eighteen players a snapshot instead of split screen's four,
 // the most a private match has.
 //
-// The server then turns the second player away: it lets in a player only
-// when a session holds his XUID (SV_DirectConnect, "Party_FindMember() worked
-// but Session_FindRegisteredUser() did not"), and the title registers one
-// player a machine, the first. So whenever it registers this machine's first
-// player in a session, the other active local players are registered there
-// too, in free slots and otherwise as he was; and a player made active later
-// is registered in the sessions the first is already in.
+// A party keeps one member a player, and the title adds one a machine: its
+// first player when it hosts, each machine that joins. Its own code knows a
+// member may be local (the timeout spares a member whose XUID is signed in
+// here, sub_823380C0), so a player who joins is added to the parties this
+// machine hosts the way the host adds a machine that joined
+// (PartyHost_AddPlayerAtSlot), in a free slot, with this machine's address and
+// otherwise the first player's details. The lobby then lists him, the party
+// state other machines are sent carries him, and the party's session --
+// which the server checks a connecting player against (SV_DirectConnect,
+// Session_FindRegisteredUser) -- registers him. He is removed from them as he
+// leaves. Any other session the first player is registered in gets the
+// others registered beside him (Session_RegisterUser).
+//
+// The machine's other players share its address, and the party finds a
+// member by address (T_Party_FindMemberByAddr): for the member a message is
+// from, whose details the host writes over his, and for the member of one
+// party another is synced into. What this machine sends is its first
+// player's, so the lookup passes over the others.
+//
+// A controller nobody plays at joins with START while this machine hosts a
+// party in the menus, a press the title does not see: the sign-in screen
+// opens first if nobody is signed in there, and choosing a profile joins once
+// the title has read the profile in. Holding Back for two seconds, or signing
+// out, leaves. Signing in, the title makes the new player's controller the
+// one the menus answer to and every local client active, as for one player a
+// machine; while players have joined, the menus stay the first player's and
+// only the players in the game are active.
 #include <ppc_recomp_shared.h>
 #include "split_live.h"
 #include "env.h"
@@ -40,6 +60,7 @@
 #include "kernel/kernel.h"
 
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <cstring>
 #include <mutex>
@@ -49,22 +70,41 @@
 namespace
 {
     constexpr uint16_t kBack = 0x0020, kStart = 0x0010;
-    constexpr auto kHold = std::chrono::seconds(1);
+    constexpr auto kLeaveHold = std::chrono::seconds(2);
 
+    // What the controllers asked for, from their reads to the next frame.
     std::mutex g_lock;
+    uint16_t g_held[signin::kUsers]{};
     std::chrono::steady_clock::time_point g_backSince[signin::kUsers];
-    bool g_backHeld[signin::kUsers]{}, g_backDone[signin::kUsers]{};
-    bool g_toggle[signin::kUsers]{};
+    bool g_backDone[signin::kUsers]{};
+    bool g_join[signin::kUsers]{}, g_leave[signin::kUsers]{};
+    bool g_hideStart[signin::kUsers]{};   // a START that joined, until it is let go
+    std::atomic<bool> g_lobby{ false };          // as of the last frame
+    std::atomic<bool> g_joined[signin::kUsers]{};
+}
 
-#ifdef T_Cmd_ExecuteSingleCommand
+#if defined(T_Cmd_ExecuteSingleCommand) && defined(T_PartyHost_AddPlayerAtSlot)
+namespace
+{
     constexpr uint32_t kClients = 4;
+    constexpr uint32_t kParties[] = { T_DATA_Party0, T_DATA_Party1 };
+    constexpr uint8_t kInParty = 3;   // a member's status from here up
+
+    bool g_asked[signin::kUsers]{};   // the sign-in screen was opened for a join
+    // A player signed in for a join waits for the title to read his profile in.
+    std::chrono::steady_clock::time_point g_signedInAt[signin::kUsers];
+    bool g_waiting[signin::kUsers]{};
+    constexpr auto kSettle = std::chrono::milliseconds(1500);
+    // The first player's controller -- the first, signed in to Live from the
+    // start -- which the menus answer to.
+    constexpr int32_t kFirst = 0;
 
     struct State
     {
-        int32_t multi = 0, primary = 0;
+        int32_t multi = 0, primary = 0, count = 0;
         std::array<int32_t, kClients> client{};
         std::array<uint8_t, kClients> active{};
-        std::array<int32_t, kClients> connection{};
+        std::array<int32_t, kClients> connection{}, room{};
         bool operator==(const State&) const = default;
     };
 
@@ -73,11 +113,16 @@ namespace
         State s;
         s.multi = *GuestPtr<be32>(T_DATA_MultiGamepads);
         s.primary = *GuestPtr<be32>(T_DATA_PrimaryController);
+        s.count = *GuestPtr<be32>(T_DATA_LocalClientCount);
+        const uint32_t clients = *GuestPtr<be32>(T_DATA_LocalClients);
         for (uint32_t i = 0; i < kClients; i++)
         {
             s.client[i] = *GuestPtr<be32>(T_DATA_ControllerClient + 4 * i);
             s.active[i] = *GuestPtr<uint8_t>(T_DATA_ClientUIActive + T_CONN_STATE_STRIDE * i);
             s.connection[i] = *GuestPtr<be32>(T_DATA_ClientConnState + T_CONN_STATE_STRIDE * i);
+            s.room[i] = clients && int32_t(i) < s.count
+                            ? int32_t(*GuestPtr<be32>(clients + i * T_LOCAL_CLIENT_STRIDE + T_LOCAL_CLIENT_PARSE_ROOM))
+                            : 0;
         }
         return s;
     }
@@ -85,14 +130,56 @@ namespace
     void Note(const State& s)
     {
         std::string text;
-        char part[96];
+        char part[112];
         for (uint32_t i = 0; i < kClients; i++)
         {
-            std::snprintf(part, sizeof part, " | controller %u -> client %d, client %u %s, connection %d", i,
-                          s.client[i], i, s.active[i] ? "active" : "inactive", s.connection[i]);
+            std::snprintf(part, sizeof part, " | controller %u -> client %d, client %u %s, connection %d, room %d", i,
+                          s.client[i], i, s.active[i] ? "active" : "inactive", s.connection[i], s.room[i]);
             text += part;
         }
-        LOGI("splitlive: multi gamepads %d, primary controller %d%s", s.multi, s.primary, text.c_str());
+        LOGI("splitlive: %d local clients, multi gamepads %d, primary controller %d%s", s.count, s.multi, s.primary,
+             text.c_str());
+    }
+
+    uint32_t Member(uint32_t party, uint32_t index) { return party + T_PARTY_MEMBERS + index * T_PARTY_MEMBER_SIZE; }
+
+    int32_t MemberOf(uint32_t party, uint64_t xuid)
+    {
+        for (uint32_t i = 0; i < T_SESSION_SLOTS; i++)
+            if (*GuestPtr<uint8_t>(Member(party, i)) >= kInParty &&
+                uint64_t(*GuestPtr<be64>(Member(party, i) + T_MEMBER_XUID)) == xuid)
+                return int32_t(i);
+        return -1;
+    }
+
+    bool Hosting(uint32_t party) { return *GuestPtr<be32>(party + T_PARTY_HOSTING) != 0; }
+
+    // The parties, as the log tells them whenever they change: who hosts, and
+    // the members, the first player's marked.
+    void NoteParties()
+    {
+        static std::string last;
+        std::string text;
+        char part[96];
+        for (uint32_t party : kParties)
+        {
+            const uint32_t me = *GuestPtr<be32>(party + T_PARTY_ME);
+            std::snprintf(part, sizeof part, " | party %08x%s:", party, Hosting(party) ? " (hosting)" : "");
+            text += part;
+            for (uint32_t i = 0; i < T_SESSION_SLOTS; i++)
+            {
+                const uint32_t m = Member(party, i);
+                const uint8_t status = *GuestPtr<uint8_t>(m);
+                if (!status) continue;
+                char name[33]{};
+                std::memcpy(name, GuestPtr<char>(m + T_MEMBER_NAME), 32);
+                std::snprintf(part, sizeof part, " %u%s \"%s\" (status %u)", i, i == me ? "*" : "", name, status);
+                text += part;
+            }
+        }
+        if (text == last) return;
+        last = text;
+        LOGI("splitlive: parties%s", text.c_str());
     }
 
     // The command, run as `controller` the way the menus run it.
@@ -111,8 +198,188 @@ namespace
         ctx = saved;
         LOGI("splitlive: ran \"%s\" as controller %u", command, controller);
     }
-#endif
+
+    // The player at `user` into `party`, if this machine hosts it, as the host
+    // adds a machine that joins: PartyHost_AddPlayerAtSlot(party, slot,
+    // address (8 bytes, then 4 in the high word), &xuid, &8 bytes, name, clan
+    // tag; on the stack the member's details), which fills the member, gives
+    // him the address and registers him in the party's session. All but the
+    // name and the XUID are the first player's: the same machine.
+    void AddToParty(PPCContext& ctx, uint8_t* base, uint32_t party, uint32_t user)
+    {
+        const uint64_t xuid = kernel::LiveXuid(user);
+        const uint32_t session = *GuestPtr<be32>(party);
+        const uint32_t me = *GuestPtr<be32>(party + T_PARTY_ME);
+        if (!xuid || !Hosting(party) || !session || me >= T_SESSION_SLOTS || MemberOf(party, xuid) >= 0) return;
+        const uint32_t mine = Member(party, me);
+        if (*GuestPtr<uint8_t>(mine) < kInParty) return;
+
+        uint32_t slots = uint32_t(*GuestPtr<be32>(session + T_SESSION_PRIVATE)) + uint32_t(*GuestPtr<be32>(session + T_SESSION_PUBLIC));
+        if (slots > T_SESSION_SLOTS) slots = T_SESSION_SLOTS;
+        int32_t slot = -1;
+        for (uint32_t i = 0; i < slots && slot < 0; i++)
+            if (!*GuestPtr<uint8_t>(Member(party, i)) && !*GuestPtr<uint8_t>(session + T_SESSION_USERS + i * T_SESSION_USER_SIZE))
+                slot = int32_t(i);
+        if (slot < 0)
+        {
+            LOGW("splitlive: party %08x is full; controller %u is not in it", party, user);
+            return;
+        }
+
+        const PPCContext saved = ctx;
+        const uint32_t sp = (ctx.r1.u32 - 0x800) & ~0xFu;
+        const uint32_t data = sp + 0x100;
+        std::memset(GuestPtr<uint8_t>(data), 0, 0x40);
+        *GuestPtr<be64>(data) = xuid;
+        std::memcpy(GuestPtr<uint8_t>(data + 8), GuestPtr<uint8_t>(mine + T_MEMBER_MACHINE), 8);
+        std::snprintf(GuestPtr<char>(data + 16), 32, "%s", signin::At(user).name.c_str());
+        std::memcpy(GuestPtr<uint8_t>(data + 48), GuestPtr<uint8_t>(mine + T_MEMBER_CLANTAG), 5);
+        // The details, where the callee reads them past its 160-byte frame.
+        *GuestPtr<uint8_t>(sp + 87) = *GuestPtr<uint8_t>(mine + 1);
+        const uint32_t words[][2] = { { 92, 124 }, { 100, 128 }, { 108, 148 }, { 116, 152 },
+                                      { 124, 156 }, { 132, 100 }, { 148, 168 } };
+        for (const auto& w : words) *GuestPtr<be32>(sp + w[0]) = uint32_t(*GuestPtr<be32>(mine + w[1]));
+        *GuestPtr<uint8_t>(sp + 143) = *GuestPtr<uint8_t>(mine + 164);
+        const uint32_t address = session + T_SESSION_USERS + me * T_SESSION_USER_SIZE + T_SESSION_USER_ADDRESS;
+
+        ctx.r1.u64 = sp;
+        ctx.r3.u64 = party;
+        ctx.r4.u64 = uint32_t(slot);
+        ctx.r5.u64 = uint64_t(*GuestPtr<be64>(address));
+        ctx.r6.u64 = uint64_t(uint32_t(*GuestPtr<be32>(address + 8))) << 32;
+        ctx.r7.u64 = data;
+        ctx.r8.u64 = data + 8;
+        ctx.r9.u64 = data + 16;
+        ctx.r10.u64 = data + 48;
+        GUEST_FUNC(T_PartyHost_AddPlayerAtSlot)(ctx, base);
+        const bool added = ctx.r3.u8 != 0;
+        ctx = saved;
+        LOGI("splitlive: controller %u (\"%s\", xuid %016llx) %s party %08x at slot %d", user,
+             signin::At(user).name.c_str(), (unsigned long long)xuid, added ? "added to" : "NOT added to", party, slot);
+    }
+
+    void RemoveFromParty(PPCContext& ctx, uint8_t* base, uint32_t party, uint32_t user)
+    {
+        const uint64_t xuid = kernel::LiveXuid(user);
+        const int32_t slot = xuid && Hosting(party) ? MemberOf(party, xuid) : -1;
+        if (slot < 0 || uint32_t(slot) == uint32_t(*GuestPtr<be32>(party + T_PARTY_ME))) return;
+        const PPCContext saved = ctx;
+        ctx.r1.u64 = (ctx.r1.u32 - 0x400) & ~0xFull;
+        ctx.r3.u64 = party;
+        ctx.r4.u64 = uint32_t(slot);
+        ctx.r5.u64 = 0;                      // nobody to tell: he is here
+        ctx.r6.u64 = T_DATA_EmptyString;
+        GUEST_FUNC(T_PartyHost_RemoveMember)(ctx, base);
+        ctx = saved;
+        LOGI("splitlive: controller %u left party %08x (slot %d)", user, party, slot);
+    }
+
+    // In the Xbox LIVE menus, hosting a party, with no game joined.
+    bool InLobby(const State& s)
+    {
+        if (s.connection[0] != 0) return false;
+        for (uint32_t party : kParties)
+            if (Hosting(party)) return true;
+        return false;
+    }
+
+    void Join(PPCContext& ctx, uint8_t* base, uint32_t user)
+    {
+        g_joined[user] = true;
+        if (!*GuestPtr<be32>(T_DATA_MultiGamepads))
+        {
+            *GuestPtr<be32>(T_DATA_MultiGamepads) = 1;
+            LOGI("splitlive: every controller routed to its own client (cl_multi_gamepads_enabled)");
+        }
+        Run(ctx, base, user, "makeLocalClientActive");
+        for (uint32_t party : kParties) AddToParty(ctx, base, party, user);
+    }
+
+    void Leave(PPCContext& ctx, uint8_t* base, uint32_t user)
+    {
+        g_joined[user] = false;
+        for (uint32_t party : kParties) RemoveFromParty(ctx, base, party, user);
+        Run(ctx, base, user, "makeLocalClientInactive");
+    }
+
+    // In the lobby with players joined: the menus stay the first player's, and
+    // only the players in the game are active.
+    void Keep(const State& s)
+    {
+        bool any = false;
+        for (uint32_t user = 1; user < signin::kUsers; user++) any = any || g_joined[user];
+        if (!any) return;
+        if (s.primary != kFirst || int32_t(*GuestPtr<be32>(T_DATA_MenuController)) != kFirst)
+        {
+            *GuestPtr<be32>(T_DATA_PrimaryController) = uint32_t(kFirst);
+            *GuestPtr<be32>(T_DATA_MenuController) = uint32_t(kFirst);
+            LOGI("splitlive: the menus stay with the first controller");
+        }
+        if (!s.multi) *GuestPtr<be32>(T_DATA_MultiGamepads) = 1;
+        for (uint32_t client = 0; client < kClients; client++)
+        {
+            const uint8_t want = client == uint32_t(kFirst) || (client < signin::kUsers && g_joined[client]);
+            if (s.active[client] != want)
+                *GuestPtr<uint8_t>(T_DATA_ClientUIActive + T_CONN_STATE_STRIDE * client) = want;
+        }
+    }
 }
+
+#ifdef T_Party_FindMemberByAddr
+namespace
+{
+    // One of this machine's players beside the first.
+    bool Beside(uint32_t party, int32_t index)
+    {
+        if (index < 0 || index >= int32_t(T_SESSION_SLOTS)) return false;
+        const uint64_t xuid = *GuestPtr<be64>(Member(party, uint32_t(index)) + T_MEMBER_XUID);
+        for (uint32_t user = 1; user < signin::kUsers; user++)
+            if (xuid && xuid == kernel::LiveXuid(user)) return true;
+        return false;
+    }
+}
+
+GUEST_HOOK(T_Party_FindMemberByAddr)
+{
+    const PPCContext call = ctx;
+    GUEST_ORIG(T_Party_FindMemberByAddr)(ctx, base);
+    if (!splitlive::On()) return;
+    // Past this machine's other players, to the next member at the address.
+    while (Beside(call.r3.u32, ctx.r3.s32))
+    {
+        const int32_t past = ctx.r3.s32;
+        const PPCContext result = ctx;
+        ctx = call;
+        ctx.r6.u64 = uint32_t(past + 1);
+        if (past + 1 >= int32_t(T_SESSION_SLOTS))
+        {
+            ctx = result;
+            ctx.r3.s64 = -1;
+            return;
+        }
+        GUEST_ORIG(T_Party_FindMemberByAddr)(ctx, base);
+        if (ctx.r3.s32 >= 0 && ctx.r3.s32 <= past)   // the fallback walk found him again
+        {
+            ctx.r3.s64 = -1;
+            return;
+        }
+    }
+}
+#endif
+
+#ifdef T_PartyHost_StartParty
+// A party started (or started again) while players beside the first are in
+// the game: they are in it too.
+GUEST_HOOK(T_PartyHost_StartParty)
+{
+    const uint32_t party = ctx.r3.u32;
+    GUEST_ORIG(T_PartyHost_StartParty)(ctx, base);
+    if (!splitlive::On()) return;
+    for (uint32_t user = 1; user < signin::kUsers; user++)
+        if (g_joined[user]) AddToParty(ctx, base, party, user);
+}
+#endif
+#endif
 
 #ifdef T_CL_InitLocalClients
 namespace
@@ -184,113 +451,8 @@ GUEST_HOOK(T_CL_InitLocalClients)
     g_realSplitscreen = 0;
     *GuestPtr<be32>(T_DATA_SplitscreenDvar) = real;
     Widen(ctx, base);
-    LOGI("splitlive: local clients set up for Xbox LIVE (server running %u): %u before, %u now, room for 18 players a snapshot",
+    LOGI("splitlive: local clients set up for Xbox LIVE (server running %u): %u before, %u now",
          running, before, uint32_t(*GuestPtr<be32>(T_DATA_LocalClientCount)));
-}
-
-PPC_FUNC_IMPL(GUEST_ORIG(T_Session_RegisterUser));
-
-namespace
-{
-    // How the first player was put in a session: the arguments again, but for
-    // the xuid and the slot.
-    struct Registration
-    {
-        uint32_t controller = 0, session = 0, privateSlot = 0, natType = 0, r9 = 0, r10 = 0;
-        uint64_t stacked = 0;
-    };
-    std::mutex g_registrationLock;
-    std::vector<Registration> g_registrations;   // a session each
-    bool g_registering = false;
-
-    bool Holds(uint32_t session, uint64_t xuid, int32_t* slot = nullptr)
-    {
-        for (uint32_t i = 0; i < T_SESSION_SLOTS; i++)
-        {
-            const uint32_t at = session + T_SESSION_USERS + i * T_SESSION_USER_SIZE;
-            if (*GuestPtr<uint8_t>(at) && uint64_t(*GuestPtr<be64>(at + T_SESSION_USER_XUID)) == xuid)
-            {
-                if (slot) *slot = int32_t(i);
-                return true;
-            }
-        }
-        return false;
-    }
-
-    // Every active local player beside the first, into the session the first
-    // was registered in as `r` says.
-    void RegisterLocals(PPCContext& ctx, uint8_t* base, const Registration& r)
-    {
-        for (uint32_t user = 1; user < signin::kUsers; user++)
-        {
-            const uint64_t xuid = kernel::LiveXuid(user);
-            if (!xuid || !*GuestPtr<uint8_t>(T_DATA_ClientUIActive + T_CONN_STATE_STRIDE * user) ||
-                Holds(r.session, xuid))
-                continue;
-            int32_t slot = -1;
-            for (uint32_t i = 0; i < T_SESSION_SLOTS && slot < 0; i++)
-                if (!*GuestPtr<uint8_t>(r.session + T_SESSION_USERS + i * T_SESSION_USER_SIZE)) slot = int32_t(i);
-            if (slot < 0)
-            {
-                LOGW("splitlive: no free slot for controller %u in session %08x", user, r.session);
-                continue;
-            }
-            const PPCContext saved = ctx;
-            const uint32_t sp = (ctx.r1.u32 - 0x400) & ~0xFu;
-            *GuestPtr<be64>(sp + 88) = r.stacked;   // the ninth argument, where the callee reads it
-            ctx.r1.u64 = sp;
-            ctx.r3.u64 = r.controller;
-            ctx.r4.u64 = r.session;
-            ctx.r5.u64 = xuid;
-            ctx.r6.u64 = r.privateSlot;
-            ctx.r7.u64 = uint32_t(slot);
-            ctx.r8.u64 = r.natType;
-            ctx.r9.u64 = r.r9;
-            ctx.r10.u64 = r.r10;
-            g_registering = true;
-            GUEST_ORIG(T_Session_RegisterUser)(ctx, base);
-            g_registering = false;
-            ctx = saved;
-            LOGI("splitlive: controller %u (xuid %016llx) registered in session %08x at slot %d, beside the first player",
-                 user, (unsigned long long)xuid, r.session, slot);
-        }
-    }
-
-    void RegisterLater(PPCContext& ctx, uint8_t* base)
-    {
-        std::vector<Registration> known;
-        {
-            std::lock_guard g(g_registrationLock);
-            known = g_registrations;
-        }
-        const uint64_t first = kernel::LiveXuid(0);
-        for (const Registration& r : known)
-            if (Holds(r.session, first)) RegisterLocals(ctx, base, r);
-    }
-}
-
-GUEST_HOOK(T_Session_RegisterUser)
-{
-    const bool first = splitlive::On() && !g_registering && ctx.r5.u64 == kernel::LiveXuid(0);
-    Registration r;
-    if (first)
-    {
-        r.controller = ctx.r3.u32;
-        r.session = ctx.r4.u32;
-        r.privateSlot = ctx.r6.u32;
-        r.natType = ctx.r8.u32;
-        r.r9 = ctx.r9.u32;
-        r.r10 = ctx.r10.u32;
-        r.stacked = *GuestPtr<be64>(ctx.r1.u32 + 88);
-    }
-    GUEST_ORIG(T_Session_RegisterUser)(ctx, base);
-    if (!first) return;
-    {
-        std::lock_guard g(g_registrationLock);
-        std::erase_if(g_registrations, [&](const Registration& known) { return known.session == r.session; });
-        g_registrations.push_back(r);
-    }
-    RegisterLocals(ctx, base, r);
 }
 
 GUEST_HOOK(T_SV_InitHunk)
@@ -302,61 +464,163 @@ GUEST_HOOK(T_SV_InitHunk)
 }
 #endif
 
+#ifdef T_Session_RegisterUser
+PPC_FUNC_IMPL(GUEST_ORIG(T_Session_RegisterUser));
+
+namespace
+{
+    bool g_registering = false;
+
+    bool Holds(uint32_t session, uint64_t xuid)
+    {
+        for (uint32_t i = 0; i < T_SESSION_SLOTS; i++)
+        {
+            const uint32_t at = session + T_SESSION_USERS + i * T_SESSION_USER_SIZE;
+            if (*GuestPtr<uint8_t>(at) && uint64_t(*GuestPtr<be64>(at + T_SESSION_USER_XUID)) == xuid) return true;
+        }
+        return false;
+    }
+
+    bool PartySession(uint32_t session)
+    {
+#ifdef T_PartyHost_AddPlayerAtSlot
+        for (uint32_t party : kParties)
+            if (uint32_t(*GuestPtr<be32>(party)) == session) return true;
+#endif
+        return false;
+    }
+}
+
+// The first player put in a session that is not a party's (which the party
+// keeps its members in itself): the other active local players beside him,
+// in free slots and otherwise as he was. Session_RegisterUser(controller,
+// session, xuid, private, slot, natType, ?, address; on the stack one more).
+GUEST_HOOK(T_Session_RegisterUser)
+{
+    const uint32_t session = ctx.r4.u32;
+    const bool first = splitlive::On() && !g_registering && ctx.r5.u64 == kernel::LiveXuid(0) && !PartySession(session);
+    const PPCContext call = ctx;
+    const uint64_t stacked = *GuestPtr<be64>(ctx.r1.u32 + 88);
+    GUEST_ORIG(T_Session_RegisterUser)(ctx, base);
+    if (!first) return;
+    for (uint32_t user = 1; user < signin::kUsers; user++)
+    {
+        const uint64_t xuid = kernel::LiveXuid(user);
+        if (!xuid || !g_joined[user] || Holds(session, xuid)) continue;
+        int32_t slot = -1;
+        for (uint32_t i = 0; i < T_SESSION_SLOTS && slot < 0; i++)
+            if (!*GuestPtr<uint8_t>(session + T_SESSION_USERS + i * T_SESSION_USER_SIZE)) slot = int32_t(i);
+        if (slot < 0) continue;
+        const PPCContext saved = ctx;
+        ctx = call;
+        const uint32_t sp = (call.r1.u32 - 0x400) & ~0xFu;
+        *GuestPtr<be64>(sp + 88) = stacked;   // the ninth argument, where the callee reads it
+        ctx.r1.u64 = sp;
+        ctx.r5.u64 = xuid;
+        ctx.r7.u64 = uint32_t(slot);
+        g_registering = true;
+        GUEST_ORIG(T_Session_RegisterUser)(ctx, base);
+        g_registering = false;
+        ctx = saved;
+        LOGI("splitlive: controller %u (xuid %016llx) registered in session %08x at slot %d, beside the first player",
+             user, (unsigned long long)xuid, session, slot);
+    }
+}
+#endif
+
 bool splitlive::On()
 {
     static const bool on = env::Flag("MW2_SPLIT_LIVE") && online::Live();
     return on;
 }
 
-void splitlive::Input(uint32_t user, uint16_t buttons)
+uint16_t splitlive::Input(uint32_t user, uint16_t buttons)
 {
-    if (!On() || user == 0 || user >= signin::kUsers) return;
+    if (!On() || user == 0 || user >= signin::kUsers) return 0;
     std::lock_guard g(g_lock);
+    const uint16_t pressed = buttons & ~g_held[user];
+    g_held[user] = buttons;
+    // START at a controller not in the game is a join, not the menu's button,
+    // and stays hidden until it is let go, the player in the game by then.
+    if ((pressed & kStart) && g_lobby && !g_joined[user]) g_hideStart[user] = true;
+    if (!(buttons & kStart)) g_hideStart[user] = false;
+    const uint16_t hidden = g_hideStart[user] ? kStart : 0;
+    if ((pressed & kStart) && !(buttons & kBack)) g_join[user] = true;
     const bool back = (buttons & (kBack | kStart)) == kBack;
     const auto now = std::chrono::steady_clock::now();
-    if (back && !g_backHeld[user]) { g_backSince[user] = now; g_backDone[user] = false; }
-    g_backHeld[user] = back;
-    if (back && !g_backDone[user] && now - g_backSince[user] >= kHold)
+    if (!back) g_backDone[user] = false;
+    else if (pressed & kBack) g_backSince[user] = now;
+    else if (!g_backDone[user] && now - g_backSince[user] >= kLeaveHold)
     {
         g_backDone[user] = true;
-        if (signin::At(user).signedIn) g_toggle[user] = true;
-        else LOGI("splitlive: controller %u held Back, but nobody is signed in there", user);
+        g_leave[user] = true;
     }
+    return hidden;
 }
 
 void splitlive::Frame(PPCContext& ctx, uint8_t* base)
 {
     if (!On()) return;
-#ifdef T_Cmd_ExecuteSingleCommand
+#if defined(T_Cmd_ExecuteSingleCommand) && defined(T_PartyHost_AddPlayerAtSlot)
     static State last;
     static bool first = true;
     const State now = Read();
     if (first || !(now == last)) Note(now);
     first = false;
     last = now;
+    NoteParties();
 
+    const bool lobby = InLobby(now);
+    g_lobby = lobby;
+    // Out of Xbox LIVE (no party hosted, no game), nobody is in the game.
+    if (!lobby && now.connection[0] == 0)
+        for (uint32_t user = 1; user < signin::kUsers; user++) g_joined[user] = false;
     for (uint32_t user = 1; user < signin::kUsers; user++)
     {
+        bool join, leave;
         {
             std::lock_guard g(g_lock);
-            if (!g_toggle[user]) continue;
-            g_toggle[user] = false;
+            join = g_join[user];
+            leave = g_leave[user];
+            g_join[user] = g_leave[user] = false;
         }
-        if (now.active[user])
+        const bool joined = g_joined[user];
+        const bool signedIn = signin::At(user).signedIn;
+        const auto time = std::chrono::steady_clock::now();
+
+        // Joining: START, then the sign-in screen when nobody is signed in,
+        // then the title reads the profile in.
+        if (join && !joined)
         {
-            Run(ctx, base, user, "makeLocalClientInactive");
-            continue;
+            if (!lobby)
+                LOGI("splitlive: START on controller %u: players join in the Xbox LIVE lobby this machine hosts", user);
+            else if (signedIn)
+                Join(ctx, base, user);
+            else if (!signin::Open())
+            {
+                signin::AskFor(user);
+                g_asked[user] = true;
+            }
         }
-        if (!now.multi)
+        if (g_asked[user] && !signin::Open())
         {
-            *GuestPtr<be32>(T_DATA_MultiGamepads) = 1;
-            LOGI("splitlive: every controller routed to its own client (cl_multi_gamepads_enabled)");
+            g_asked[user] = false;
+            if (signin::At(user).signedIn)
+            {
+                g_waiting[user] = true;
+                g_signedInAt[user] = time;
+            }
         }
-        Run(ctx, base, user, "makeLocalClientActive");
-#ifdef T_Session_RegisterUser
-        RegisterLater(ctx, base);
-#endif
+        if (g_waiting[user] && time - g_signedInAt[user] >= kSettle)
+        {
+            g_waiting[user] = false;
+            if (signin::At(user).signedIn && lobby && !g_joined[user]) Join(ctx, base, user);
+        }
+
+        // Leaving: Back held, or signing out.
+        if (joined && lobby && (leave || !signedIn)) Leave(ctx, base, user);
     }
+    if (lobby) Keep(Read());
 #else
     (void)ctx; (void)base;
 #endif
