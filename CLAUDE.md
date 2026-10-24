@@ -24,6 +24,9 @@ The user tests on Windows PCs with real controllers; Claude does the engineering
 - Test builds for the user: `C:\AI\Projects\mw2\builds\<stage>\` with a `launch.bat`
   that sets `MW2_LOG_FILE=C:\AI\Projects\mw2\logs\mw2.log`.
 - Logs: `/mnt/c/AI/Projects/mw2/logs/` (`mw2.log` this PC, `mw2-pc2.log`... others).
+- PC2 (MARSHMELLOW, 192.168.0.144) shares its `C:\AI\Projects\mw2` as `\\192.168.0.144\mw2`
+  (Git Bash: `//192.168.0.144/mw2`): put PC2's builds in `builds/pc2-kit/` there and read
+  `logs/mw2-pc2.log` directly. Its launch.bat must set `MW2_LAN_ACCEPT=1` to take invites.
 
 ## Build (Windows multiplayer, lan, as the official release)
     cd ~/mw2-recompiled
@@ -45,5 +48,11 @@ system-link split-screen; report approach, risks, odds.
 - Stage 0: stock build of upstream b2ebb69 built OK -> `builds\stage0-stock\`
   (`install.bat` installs from the ISO once, `launch.bat` runs it). User confirmed it
   runs like the official release. DONE.
-- Next: Stage 1. New test builds can reuse an installed `game\` folder (copy it or
+- Stage 1: `lan.cpp` ranks adapters (private+gateway on a card first, link-local last),
+  broadcasts to the chosen subnet's broadcast address, `MW2_LAN_ADDRESS=<ip>|first`.
+  Verified choice on this PC (Mullvad, Tailscale, Ethernet, vEthernet -> Ethernet) with
+  a standalone test exe. Build in `builds\stage1-adapter\` (junctions to stage0-stock's
+  game/saves/shaders). Two-PC test passed: private match invite PC1 -> PC2 with Mullvad
+  and Tailscale up on PC1 (invitee needs `MW2_LAN_ACCEPT=1`). DONE.
+- Next: Stage 2. New test builds can reuse an installed `game\` folder (copy it or
   install again); git identity is popcan85 with the GitHub noreply email.
