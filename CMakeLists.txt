@@ -299,9 +299,9 @@ else()
     message(STATUS "Vulkan not found -- building without a window")
 endif()
 
-if(NOT WIN32)
-    target_link_libraries(mw2 PRIVATE pthread)
-endif()
+# Every build: Windows takes clock_gettime from it (llvm-mingw's winpthread),
+# which the diagnostic builds' CPU-time reports call.
+target_link_libraries(mw2 PRIVATE pthread)
 
 # The two tools below are for working on the renderer, on Linux.
 if(NOT WIN32)
