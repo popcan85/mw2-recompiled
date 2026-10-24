@@ -21,8 +21,11 @@
 #include "../log.h"
 #include "../signin.h"
 
+#include <algorithm>
 #include <chrono>
+#include <cstdio>
 #include <cstring>
+#include <fstream>
 #include <deque>
 #include <map>
 #include <mutex>
@@ -139,9 +142,17 @@ namespace
         return address;
     }
 
+    uint32_t MaskOf(unsigned prefix)
+    {
+        return prefix == 0 ? 0 : prefix >= 32 ? 0xFFFFFFFFu : ~(0xFFFFFFFFu >> prefix);
+    }
+
     // The network connections that are up, the loopback aside, in the order
-    // the system lists them.
-    struct Adapter { std::string name; uint32_t address; };
+    // the system lists them, each with its netmask, whether it has a default
+    // gateway (the connection to the rest of the network has one, a virtual
+    // machine's switch not) and whether it is a network card, Ethernet or
+    // Wi-Fi, rather than a VPN's tunnel (which may have a gateway too).
+    struct Adapter { std::string name; uint32_t address, mask; bool gateway, card; };
     std::vector<Adapter> Adapters()
     {
         std::vector<Adapter> found;
@@ -149,7 +160,8 @@ namespace
         ULONG size = 16 * 1024;
         std::vector<uint8_t> buffer(size);
         auto* adapters = reinterpret_cast<IP_ADAPTER_ADDRESSES*>(buffer.data());
-        constexpr ULONG kFlags = GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST | GAA_FLAG_SKIP_DNS_SERVER;
+        constexpr ULONG kFlags = GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST | GAA_FLAG_SKIP_DNS_SERVER
+                               | GAA_FLAG_INCLUDE_GATEWAYS;
         if (GetAdaptersAddresses(AF_INET, kFlags, nullptr, adapters, &size) == ERROR_BUFFER_OVERFLOW)
         {
             buffer.resize(size);
@@ -163,46 +175,146 @@ namespace
             if (at->FriendlyName)
                 WideCharToMultiByte(CP_UTF8, 0, at->FriendlyName, -1, name, sizeof name, nullptr, nullptr);
             name[sizeof name - 1] = 0;
+            const bool gateway = at->FirstGatewayAddress != nullptr;
+            const bool card = at->IfType == IF_TYPE_ETHERNET_CSMACD || at->IfType == IF_TYPE_IEEE80211;
             for (auto* unicast = at->FirstUnicastAddress; unicast; unicast = unicast->Next)
             {
                 const auto* address = reinterpret_cast<const sockaddr_in*>(unicast->Address.lpSockaddr);
                 if (address->sin_family == AF_INET)
-                    found.push_back({ name, ntohl(address->sin_addr.s_addr) });
+                    found.push_back({ name, ntohl(address->sin_addr.s_addr),
+                                      MaskOf(unicast->OnLinkPrefixLength), gateway, card });
             }
         }
 #else
+        // Linux keeps the gateways in its routing table: a default route's
+        // destination and mask are both zero.
+        std::vector<std::string> gateways;
+        std::ifstream routes("/proc/net/route");
+        std::string line;
+        std::getline(routes, line);   // the heading
+        while (std::getline(routes, line))
+        {
+            char name[64];
+            unsigned destination = 1, mask = 1;
+            if (std::sscanf(line.c_str(), "%63s %x %*x %*x %*d %*d %*d %x", name, &destination, &mask) == 3
+                && destination == 0 && mask == 0)
+                gateways.push_back(name);
+        }
         ifaddrs* list = nullptr;
         if (getifaddrs(&list) != 0) return found;
         for (ifaddrs* at = list; at; at = at->ifa_next)
         {
             if (!at->ifa_addr || at->ifa_addr->sa_family != AF_INET) continue;
             if (!(at->ifa_flags & IFF_UP) || (at->ifa_flags & IFF_LOOPBACK)) continue;
-            found.push_back({ at->ifa_name, ntohl(reinterpret_cast<sockaddr_in*>(at->ifa_addr)->sin_addr.s_addr) });
+            const uint32_t mask = at->ifa_netmask
+                ? ntohl(reinterpret_cast<sockaddr_in*>(at->ifa_netmask)->sin_addr.s_addr) : 0;
+            const bool gateway = std::find(gateways.begin(), gateways.end(), at->ifa_name) != gateways.end();
+            // A network card has a device behind it; a tunnel or a bridge has none.
+            const bool card = access(("/sys/class/net/" + std::string(at->ifa_name) + "/device").c_str(), F_OK) == 0;
+            found.push_back({ at->ifa_name, ntohl(reinterpret_cast<sockaddr_in*>(at->ifa_addr)->sin_addr.s_addr),
+                              mask, gateway, card });
         }
         freeifaddrs(list);
 #endif
         return found;
     }
 
-    // The address other copies reach this one at: the first connection that is
-    // up and not the loopback, or the loopback when there is none. The log
-    // names them all: with more than one, the first may not be the one the
-    // other players are on.
-    uint32_t OwnAddress()
+    std::string Text(uint32_t address)
+    {
+        in_addr in;
+        in.s_addr = htonl(address);
+        char text[INET_ADDRSTRLEN];
+        inet_ntop(AF_INET, &in, text, sizeof text);
+        return text;
+    }
+
+    bool Private(uint32_t address)   // 10/8, 172.16/12, 192.168/16
+    {
+        return (address >> 24) == 10 || (address >> 20) == 0xAC1 || (address >> 16) == 0xC0A8;
+    }
+
+    bool LinkLocal(uint32_t address) { return (address >> 16) == 0xA9FE; }   // 169.254/16
+
+    // How likely a connection is to be the one the other players are on, best
+    // first: a private address with a gateway is the home or office network,
+    // on a network card before a VPN's tunnel with a private address and a
+    // gateway of its own (Mullvad's); a private one without is a virtual
+    // machine's switch (Hyper-V's vEthernet); a public one, or a VPN's
+    // (Tailscale's 100.64/10), comes after; a link-local address, which
+    // Windows gives a connection that found no server to ask, reaches nobody
+    // else.
+    int Rank(const Adapter& adapter)
+    {
+        if (LinkLocal(adapter.address)) return 5;
+        if (Private(adapter.address)) return (adapter.gateway ? 0 : 2) + (adapter.card ? 0 : 1);
+        return 4;
+    }
+
+    // Where other copies reach this one, and where its broadcasts go.
+    struct Own { uint32_t address, broadcast; };
+
+    // The connection the other players are most likely on (Rank), the first
+    // the system lists among equals, or the loopback when there is none.
+    // MW2_LAN_ADDRESS=<address> names it; MW2_LAN_ADDRESS=first takes the
+    // first listed, as before. Broadcasts go to the chosen network's own
+    // broadcast address, which leaves by that connection: the system sends
+    // 255.255.255.255 out of one connection of its choosing.
+    Own OwnAddress()
     {
         const std::vector<Adapter> adapters = Adapters();
+        if (adapters.empty())
+        {
+            LOGI("online: no network connection is up; lan stays on this machine");
+            return { INADDR_LOOPBACK, INADDR_BROADCAST };
+        }
         std::string list;
         for (const Adapter& adapter : adapters)
         {
-            in_addr address;
-            address.s_addr = htonl(adapter.address);
-            char text[INET_ADDRSTRLEN];
-            inet_ntop(AF_INET, &address, text, sizeof text);
-            list += (list.empty() ? "" : ", ") + adapter.name + " " + text;
+            list += (list.empty() ? "" : ", ") + adapter.name + " " + Text(adapter.address) + " ("
+                  + (LinkLocal(adapter.address) ? "link-local, " : Private(adapter.address) ? "private, " : "")
+                  + (adapter.gateway ? "gateway, " : "") + (adapter.card ? "card)" : "virtual)");
         }
-        if (adapters.empty()) LOGI("online: no network connection is up; lan stays on this machine");
-        else LOGI("online: network connections: %s; announcing the first", list.c_str());
-        return adapters.empty() ? uint32_t(INADDR_LOOPBACK) : adapters.front().address;
+        LOGI("online: network connections: %s", list.c_str());
+
+        const char* wanted = env::Text("MW2_LAN_ADDRESS");
+        if (wanted && std::strcmp(wanted, "first") == 0)
+        {
+            const Adapter& first = adapters.front();
+            LOGI("online: announcing the first, %s %s (MW2_LAN_ADDRESS=first)", first.name.c_str(),
+                 Text(first.address).c_str());
+            return { first.address, INADDR_BROADCAST };
+        }
+        const Adapter* chosen = nullptr;
+        if (wanted)
+        {
+            in_addr parsed;
+            if (inet_pton(AF_INET, wanted, &parsed) != 1)
+                LOGW("online: MW2_LAN_ADDRESS=%s is not an IPv4 address; choosing one", wanted);
+            else
+            {
+                const uint32_t address = ntohl(parsed.s_addr);
+                for (const Adapter& adapter : adapters)
+                    if (adapter.address == address) { chosen = &adapter; break; }
+                if (!chosen)
+                {
+                    LOGW("online: no network connection has %s (MW2_LAN_ADDRESS); announcing it anyway", wanted);
+                    return { address, INADDR_BROADCAST };
+                }
+            }
+        }
+        const bool named = chosen != nullptr;
+        if (!chosen)
+            chosen = &*std::min_element(adapters.begin(), adapters.end(),
+                                        [](const Adapter& a, const Adapter& b) { return Rank(a) < Rank(b); });
+        // A /31 or /32 has no broadcast address of its own.
+        const uint32_t broadcast = chosen->mask && chosen->mask < 0xFFFFFFFEu
+            ? chosen->address | ~chosen->mask : uint32_t(INADDR_BROADCAST);
+        LOGI("online: announcing %s %s%s, broadcasts to %s", chosen->name.c_str(), Text(chosen->address).c_str(),
+             named ? " (MW2_LAN_ADDRESS)" : "", Text(broadcast).c_str());
+        if (LinkLocal(chosen->address))
+            LOGW("online: %s is link-local: other machines are unlikely to reach it; MW2_LAN_ADDRESS names another",
+                 Text(chosen->address).c_str());
+        return { chosen->address, broadcast };
     }
 
     Socket OpenSocket(uint16_t port, bool shared)
@@ -254,7 +366,9 @@ namespace
             sockaddr_in bound{};
             socklen_t length = sizeof bound;
             getsockname(own_, reinterpret_cast<sockaddr*>(&bound), &length);
-            bound.sin_addr.s_addr = htonl(OwnAddress());
+            const Own own = OwnAddress();
+            bound.sin_addr.s_addr = htonl(own.address);
+            broadcast_ = own.broadcast;
             id_ = IdOf(bound);
             instance_ = std::random_device{}();
             const signin::Player player = signin::First();
@@ -290,7 +404,7 @@ namespace
         {
             sockaddr_in everyone{};
             everyone.sin_family = AF_INET;
-            everyone.sin_addr.s_addr = htonl(INADDR_BROADCAST);
+            everyone.sin_addr.s_addr = htonl(broadcast_);
             everyone.sin_port = htons(sharedPort_);
             return SendTo(everyone, fromPort, toPort, bytes, size);
         }
@@ -382,7 +496,7 @@ namespace
             const Presence presence = PresenceLocked(kAnnounce);
             sockaddr_in everyone{};
             everyone.sin_family = AF_INET;
-            everyone.sin_addr.s_addr = htonl(INADDR_BROADCAST);
+            everyone.sin_addr.s_addr = htonl(broadcast_);
             everyone.sin_port = htons(sharedPort_);
             SendDatagram(own_, &presence, sizeof presence, everyone);
         }
@@ -460,6 +574,7 @@ namespace
 
         Socket own_ = kNoSocket, shared_ = kNoSocket;
         uint16_t sharedPort_ = 0;
+        uint32_t broadcast_ = INADDR_BROADCAST;   // where announcements and the title's broadcasts go
         uint64_t id_ = 0;
         uint32_t instance_ = 0;
         uint32_t slot_ = 0;

@@ -52,6 +52,7 @@ Read by every build; see [multiplayer.md](multiplayer.md).
 |---|---|
 | `MW2_NAME=<name>` | lan: the player's name, instead of his profile's; the name of the first profile when it is made |
 | `MW2_LAN_PORT=<port>` | lan: the shared broadcast port (3074) |
+| `MW2_LAN_ADDRESS=<address>` | lan: the address other machines reach this one at, instead of the connection chosen (a private address with a gateway first, link-local last; [multiplayer.md](multiplayer.md#lan)). `first` takes the first connection the system lists and broadcasts to 255.255.255.255, as before |
 | `MW2_LAN_JOIN=<name>` | lan: joins that player's party or lobby when it is seen |
 | `MW2_LAN_ACCEPT=1` | lan: accepts invitations |
 | `MW2_STEAM_APPID=<id>` | steam: the app id to run as (480, Spacewar) |

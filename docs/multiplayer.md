@@ -172,9 +172,20 @@ bits and the port in the low 16.
 The account is the profile at the first controller
 ([gameplay.md](gameplay.md#signing-in)) plus the copy's port slot, so a second
 copy on one machine is a second player; `MW2_NAME` is another name for him than
-the profile's. The log names the network connections found and the one
-announced, and says so when another machine on the network has the same
-account.
+the profile's.
+
+The address announced is the network connection the other players are most
+likely on: a private address (10/8, 172.16/12, 192.168/16) with a default
+gateway, on a network card (Ethernet, Wi-Fi) before a VPN tunnel with a gateway
+of its own (Mullvad's), then a private one without (a virtual machine's switch, Hyper-V's
+vEthernet), then any other (a VPN's, Tailscale's 100.64/10), and a link-local
+169.254 address last; the system's order decides among equals. Broadcasts go to
+that connection's own broadcast address, so they leave by it: the system sends
+255.255.255.255 out of one connection of its choosing.
+`MW2_LAN_ADDRESS=<address>` names the address; `MW2_LAN_ADDRESS=first` takes the
+first connection listed and broadcasts to 255.255.255.255, as before. The log
+names the network connections found and the one announced, and says so when
+another machine on the network has the same account.
 
 Every copy announces who it is and what can be joined once a second on the
 shared port. `MW2_LAN_JOIN=<name>` joins that player's party or lobby as soon as
@@ -268,6 +279,7 @@ refuses as signed out.
 | `MW2_NET_LINK=0\|1` | Ethernet link reported down or up (default: up in the multiplayer, down in the campaign) |
 | `MW2_NAME` | lan: the player's name |
 | `MW2_LAN_PORT` | lan: the shared broadcast port (3074) |
+| `MW2_LAN_ADDRESS=<address>\|first` | lan: the address announced, instead of the one chosen |
 | `MW2_LAN_JOIN=<name>` | lan: join that player's party or lobby when seen |
 | `MW2_LAN_ACCEPT=1` | lan: accept invitations |
 | `MW2_STEAMCLIENT=<path>` | steam: the client library to load |
