@@ -43,4 +43,7 @@ system-link split-screen; report approach, risks, odds.
 ## Progress
 - Setup done (WSL tools, clone, `upstream` remote, branch).
 - Stage 0: stock build of upstream b2ebb69 built OK -> `builds\stage0-stock\`
-  (`install.bat` installs from the ISO once, `launch.bat` runs it). Awaiting user's test.
+  (`install.bat` installs from the ISO once, `launch.bat` runs it). User confirmed it
+  runs like the official release. DONE.
+- Next: Stage 1. New test builds can reuse an installed `game\` folder (copy it or
+  install again); git identity is popcan85 with the GitHub noreply email.
