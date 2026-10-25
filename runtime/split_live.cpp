@@ -77,6 +77,7 @@
 #include <mutex>
 #include <set>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -268,17 +269,17 @@ namespace
     // the controller's profile and registers him in the party's session. It
     // also stores the new member's byte at +1 as the party's own, which stays
     // the first player's.
-    void AddToParty(PPCContext& ctx, uint8_t* base, uint32_t party, uint32_t user)
+    bool AddToParty(PPCContext& ctx, uint8_t* base, uint32_t party, uint32_t user)
     {
         const uint64_t xuid = kernel::LiveXuid(user);
         const uint32_t me = *GuestPtr<be32>(party + T_PARTY_HOST);
-        if (!xuid || !Hosting(party) || !*GuestPtr<be32>(party) || me >= T_SESSION_SLOTS || MemberOf(party, xuid) >= 0) return;
-        if (*GuestPtr<uint8_t>(Member(party, me)) < kInParty) return;
+        if (!xuid || !Hosting(party) || !*GuestPtr<be32>(party) || me >= T_SESSION_SLOTS || MemberOf(party, xuid) >= 0) return false;
+        if (*GuestPtr<uint8_t>(Member(party, me)) < kInParty) return false;
         const int32_t slot = FreeSlot(party);
         if (slot < 0)
         {
             LOGW("splitlive: party %08x is full; controller %u is not in it", party, user);
-            return;
+            return false;
         }
         const uint32_t detail = *GuestPtr<be32>(party + T_PARTY_LOCAL_DETAIL);
         const PPCContext saved = ctx;
@@ -291,8 +292,10 @@ namespace
         *GuestPtr<be32>(party + T_PARTY_LOCAL_DETAIL) = detail;
         char name[33]{};
         std::memcpy(name, GuestPtr<char>(Member(party, uint32_t(slot)) + T_MEMBER_NAME), 32);
+        const bool added = MemberOf(party, xuid) >= 0;
         LOGI("splitlive: controller %u (\"%s\", xuid %016llx) %s party %08x at slot %d", user, name,
-             (unsigned long long)xuid, MemberOf(party, xuid) >= 0 ? "added to" : "NOT added to", party, slot);
+             (unsigned long long)xuid, added ? "added to" : "NOT added to", party, slot);
+        return added;
     }
 
     // Another machine's player beside its first, member `index` of the party
@@ -441,13 +444,34 @@ namespace
             Run(ctx, base, user, "makeLocalClientActive");
         else
             *GuestPtr<uint8_t>(T_DATA_ClientUIActive + T_CONN_STATE_STRIDE * user) = 1;
-        for (uint32_t party : kParties) AddToParty(ctx, base, party, user);
+        // The lobby's join sound, which AddLocalPlayer does not play (leaving,
+        // RemoveMember plays the other).
+        bool sound = false;
+        for (uint32_t party : kParties)
+            if (AddToParty(ctx, base, party, user) && *GuestPtr<be32>(party + T_PARTY_TAKING_MEMBERS) && Active(party))
+                sound = true;
+#ifdef T_UI_PlayerJoinSound
+        if (sound)
+        {
+            const PPCContext saved = ctx;
+            ctx.r1.u64 = (ctx.r1.u32 - 0x100) & ~0xFull;
+            ctx.r3.u64 = 0;
+            GUEST_FUNC(T_UI_PlayerJoinSound)(ctx, base);
+            ctx = saved;
+        }
+#endif
     }
+
+    void SendLeave(PPCContext& ctx, uint8_t* base, uint32_t party, uint64_t xuid);
 
     void Leave(PPCContext& ctx, uint8_t* base, uint32_t user)
     {
         g_joined[user] = false;
         for (uint32_t party : kParties) RemoveFromParty(ctx, base, party, user);
+        // In a party another machine hosts, the host is told.
+        for (uint32_t party : kParties)
+            if (!Hosting(party) && Active(party) && MemberOf(party, kernel::LiveXuid(user)) >= 0)
+                SendLeave(ctx, base, party, kernel::LiveXuid(user));
         Run(ctx, base, user, "makeLocalClientInactive");
         // Out of the game, out of his profile: START signs in again, as anyone.
         // Signing in made his controller the menus'; were it still, the title
@@ -538,6 +562,49 @@ namespace
         ctx = saved;
         LOGI("splitlive: controller %u (\"%s\", xuid %016llx) sent to the host of party %08x (memberJoin)", user,
              GuestAnsi(name).c_str(), (unsigned long long)xuid, party);
+    }
+
+    // To the host of `party`, the title's goodbye ("dis") to the address the
+    // first player's memberJoin went to: with a XUID, for that player of this
+    // machine beside the first (a host without this switch would take it for
+    // the machine's); without, for the machine.
+    void SendLeave(PPCContext& ctx, uint8_t* base, uint32_t party, uint64_t xuid)
+    {
+        const int index = PartyIndex(party);
+        if (index < 0 || !g_memberJoin[index].sent) return;
+        const MemberJoin& sent = g_memberJoin[index];
+        const PPCContext saved = ctx;
+        const uint32_t sp = (ctx.r1.u32 - 0x400) & ~0xFu;
+        const uint32_t address = sp + 0x100, text = sp + 0x120;
+        *GuestPtr<be64>(address) = sent.address;
+        *GuestPtr<be32>(address + 8) = uint32_t(sent.address2 >> 32);
+        const int32_t number = int32_t(*GuestPtr<be32>(party + T_PARTY_INDEX));
+        if (xuid)
+            std::snprintf(GuestPtr<char>(text), 64, "%ddis %016llx", number, (unsigned long long)xuid);
+        else
+            std::snprintf(GuestPtr<char>(text), 64, "%ddis", number);
+        ctx.r1.u64 = sp;
+        ctx.r3.u64 = address;
+        ctx.r4.u64 = text;
+        GUEST_FUNC(T_Party_SendText)(ctx, base);
+        ctx = saved;
+        LOGI("splitlive: told the host of party %08x: \"%s\"", party, GuestPtr<char>(text));
+    }
+
+    // The program ending (Goodbye): asked from its own thread, done on the
+    // title's next frame.
+    std::atomic<bool> g_goodbye{ false }, g_saidGoodbye{ false };
+
+    void SayGoodbye(PPCContext& ctx, uint8_t* base)
+    {
+        for (uint32_t party : kParties)
+        {
+            if (Hosting(party) || !Active(party)) continue;
+            for (uint32_t user = 1; user < signin::kUsers; user++)
+                if (g_joined[user] && MemberOf(party, kernel::LiveXuid(user)) >= 0)
+                    SendLeave(ctx, base, party, kernel::LiveXuid(user));
+            SendLeave(ctx, base, party, 0);
+        }
     }
 
     // A controller's stats are read in (and, with MW2_UNLOCK_ALL, changed: that
@@ -812,6 +879,42 @@ GUEST_HOOK(T_PartyHost_HandleMemberJoin)
 }
 #endif
 
+#ifdef T_PartyHost_HandleDisconnect
+// dis (the title's goodbye) with a XUID: one player of the sender's machine
+// beside its first leaves, and only he is removed, from each party this
+// machine hosts. Without one it is the machine leaving, as the title has it.
+GUEST_HOOK(T_PartyHost_HandleDisconnect)
+{
+    const uint32_t party = ctx.r3.u32;
+    const uint64_t xuid = splitlive::On() && Hosting(party) ? std::strtoull(Argv(1).c_str(), nullptr, 16) : 0;
+    if (!xuid)
+    {
+        GUEST_ORIG(T_PartyHost_HandleDisconnect)(ctx, base);
+        return;
+    }
+    const uint64_t from = ctx.r5.u64;   // the sender's address type and IP
+    for (uint32_t each : kParties)
+    {
+        const int32_t slot = Hosting(each) && g_beside.count(xuid) ? MemberOf(each, xuid) : -1;
+        const uint32_t at = slot >= 0 ? AddressOf(each, uint32_t(slot)) : 0;
+        if (!at || uint64_t(*GuestPtr<be64>(at)) != from) continue;
+        char name[33]{};
+        std::memcpy(name, GuestPtr<char>(Member(each, uint32_t(slot)) + T_MEMBER_NAME), 32);
+        const PPCContext saved = ctx;
+        ctx.r1.u64 = (ctx.r1.u32 - 0x400) & ~0xFull;
+        ctx.r3.u64 = each;
+        ctx.r4.u64 = uint32_t(slot);
+        ctx.r5.u64 = 0;
+        ctx.r6.u64 = T_DATA_EmptyString;
+        GUEST_FUNC(T_PartyHost_RemoveMember)(ctx, base);
+        ctx = saved;
+        LOGI("splitlive: \"%s\" (xuid %016llx) left party %08x (slot %d): his machine said so", name,
+             (unsigned long long)xuid, each, slot);
+    }
+    if (MemberOf(T_DATA_Party0, xuid) < 0 && MemberOf(T_DATA_Party1, xuid) < 0) g_beside.erase(xuid);
+}
+#endif
+
 #ifdef T_PartyHost_TimeoutMembers
 // Another machine's player beside its first is heard from whenever the first
 // is: what the machine sends is the first player's.
@@ -823,7 +926,22 @@ GUEST_HOOK(T_PartyHost_TimeoutMembers)
         {
             if (*GuestPtr<uint8_t>(Member(party, i)) < 2 || !g_beside.count(XuidAt(party, i))) continue;
             const int32_t first = FirstAt(party, i);
-            if (first < 0) continue;
+            if (first < 0)
+            {
+                // His machine's first player has left (or timed out): he goes too.
+                char name[33]{};
+                std::memcpy(name, GuestPtr<char>(Member(party, i) + T_MEMBER_NAME), 32);
+                const PPCContext saved = ctx;
+                ctx.r1.u64 = (ctx.r1.u32 - 0x400) & ~0xFull;
+                ctx.r3.u64 = party;
+                ctx.r4.u64 = i;
+                ctx.r5.u64 = 0;
+                ctx.r6.u64 = T_DATA_EmptyString;
+                GUEST_FUNC(T_PartyHost_RemoveMember)(ctx, base);
+                ctx = saved;
+                LOGI("splitlive: \"%s\" left party %08x (slot %u) with his machine's first player", name, party, i);
+                continue;
+            }
             auto heard = GuestPtr<be32>(Member(party, i) + T_MEMBER_HEARD);
             const uint32_t his = *GuestPtr<be32>(Member(party, uint32_t(first)) + T_MEMBER_HEARD);
             if (int32_t(his - uint32_t(*heard)) > 0) *heard = his;
@@ -1369,6 +1487,17 @@ uint16_t splitlive::Input(uint32_t user, uint16_t buttons)
     return hidden;
 }
 
+void splitlive::Goodbye()
+{
+#if defined(T_Cmd_ExecuteSingleCommand) && defined(T_PartyHost_AddPlayerAtSlot)
+    if (!On()) return;
+    g_goodbye = true;
+    const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds(300);
+    while (!g_saidGoodbye && std::chrono::steady_clock::now() < until)
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+#endif
+}
+
 void splitlive::Frame(PPCContext& ctx, uint8_t* base)
 {
     if (!On()) return;
@@ -1380,6 +1509,12 @@ void splitlive::Frame(PPCContext& ctx, uint8_t* base)
     first = false;
     last = now;
     NoteParties();
+
+    if (g_goodbye && !g_saidGoodbye)
+    {
+        SayGoodbye(ctx, base);
+        g_saidGoodbye = true;
+    }
 
     const bool lobby = InLobby(now);
     g_lobby = lobby;

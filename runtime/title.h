@@ -374,6 +374,19 @@
 // status 2 with the challenge's 6 bytes at +44, and memberJoin claims the
 // reserved slot its argv[1] names ("Challenge key did not match" otherwise).
 #define T_PartyHost_ReserveSlot   821A05E0
+// Party_SendText(&address, text) sends a party message ("<party>command
+// ...", the party's number at +5428) to a machine of the party. A machine
+// leaving tells the host "<party>dis", and the host's PartyHost_HandleDisconnect
+// (party, ?, from (8 bytes, then 4 in the high word), msg) removes the member
+// at the sender's address.
+#define T_PARTY_INDEX             5428u
+#define T_Party_SendText          82318FD8
+#define T_PartyHost_HandleDisconnect 821A5268
+// The lobby's sounds for a player joining and leaving (mp_player_join and
+// mp_player_leave), played for a local client; PartyHost_AddPlayerAtSlot and
+// PartyHost_RemoveMember play them for a party taking members (+5356) and
+// active (+5352).
+#define T_UI_PlayerJoinSound      8219C370
 // A game's connection handshake. Each local client asks the server with
 // `getchallenge 0 "<key>"`, its key made by CL_ChallengeKey(localClientNum,
 // buffer); SV_GetChallenge keeps a challenge per address and key (the

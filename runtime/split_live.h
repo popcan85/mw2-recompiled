@@ -48,4 +48,10 @@ namespace splitlive
     uint32_t SendingClient();
     void ReceivedFor(uint32_t localClient);
     bool PacketForAnother(uint32_t localClient, uint32_t addressType);
+
+    // The program is ending: the hosts of the parties this machine is in are
+    // told its players leave, as the title tells them when it leaves a party,
+    // so that their lobbies drop them at once instead of when they time out.
+    // Waits for the title's next frame, a moment at most.
+    void Goodbye();
 }

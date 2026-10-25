@@ -16,6 +16,7 @@
 #include "apu/xma.h"
 #include "crash.h"
 #include "online/service.h"
+#include "split_live.h"
 #include "engine.h"
 #include "pacing_trace.h"
 #include "player.h"
@@ -65,6 +66,7 @@ void crash::RequestExit(const char* why)
     std::thread([why] {
         LOGI("--------------------------------------------------");
         LOGI("exiting: %s", why);
+        splitlive::Goodbye();
         stutters::Ending();
         gpu::Shutdown();
         ReportAll();

@@ -186,20 +186,23 @@ system-link split-screen; report approach, risks, odds.
   NEXT SESSION (stage 2 polish; current builds: PC1 `builds\stage2d-two-pc\launch.bat`,
   PC2 `\\192.168.0.144\mw2\builds\pc2-kit\launch-stage2d.bat`, both diagnostic, both
   launchers swap in a `*-new.exe` placed beside a running exe):
-  1. Reconnect fix CONFIRMED by the user. Glyphs (prompts + controller icons) were
-     gone from the lobby: 822EE7F0 is Menu_IsVisible (also used for the blur), not
-     Menu_Paint, so they drew before the lobby painted over them. Hook moved to the
-     real Menu_Paint 822F1E80 (menu-stack loop 822F3F58, names checked in ui_mp.ff).
-     In both kits as `*-new.exe` (swapped in at launch); NOT yet tested.
-  2. Leaving on PC2 (Back held) is local only: the host keeps the player until PC2
-     leaves -> tell the host (e.g. a custom OOB, or the title's own member leave).
-  3. Controller icons in a joining PC's lobby (only the host draws rows from party1;
-     check PC2's rows/party).
-  4. PC1's joining player makes no join sound (we use AddLocalPlayer; find the sound).
-  5. A PC that quits stays listed ~12 s (party timeout, member+52) -- faster if possible.
-  6. connectResponse is still unowned between local clients (worked so far thanks to
-     per-client ports; check).
-  7. Then: release build + kits for both PCs, final docs, push the branch to origin.
+  1. Reconnect fix CONFIRMED. Glyphs fixed (822EE7F0 was Menu_IsVisible; hook now on
+     the real Menu_Paint 822F1E80) -- user CONFIRMED (fa5249c).
+  Polish batch (one commit, both kits, NOT yet tested):
+  2. Join sound: Join plays mp_player_join (8219C370(0)) when a party taking members
+     and active added him (AddLocalPlayer does not; RemoveMember plays the leave one).
+  3. Controller icons on a joining PC: no change -- PC2's log shows party1 active
+     with both its players, which Controllers() reads. User to check on PC2.
+  4. Leaving on PC2: Leave sends "<party>dis <xuid>" with Party_SendText 82318FD8 to
+     the address memberJoin went to; host hooks PartyHost_HandleDisconnect 821A5268:
+     with a XUID in g_beside at the sender's IP (first 8 bytes) only he is removed.
+  5. Quitting PC: TimeoutMembers hook removes a beside member whose first is gone;
+     crash::RequestExit calls splitlive::Goodbye (waits <=300 ms for a frame that
+     sends each extra's dis, then plain dis). The 12 s timeout is hard-coded (12000).
+  6. connectResponse: covered by per-client ports (server replies to the sender's
+     port; ReceivedFor/PacketForAnother) -- nothing to do unless a test says so.
+  7. Then: release build + kits for both PCs, final docs, push the branch to origin
+     (after the user confirms this batch).
   Parked: split-screen performance (title lowers resolution/fidelity in split screen;
   GPU ~53%, ~130 fps); 3+ PCs untested (non-host PCs' extras seen by each other);
   merging upstream acd414a.

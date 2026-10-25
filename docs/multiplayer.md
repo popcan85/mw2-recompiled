@@ -277,7 +277,9 @@ of this machine in an Xbox LIVE party and match through it:
   in here the name of one controller each frame (`Party_RefreshLocalMembers`);
   the other players here sit out the call. A player is in the party before
   the title has read his stats in; the details taken from them, his rank among
-  them, are made his stats' each frame after.
+  them, are made his stats' each frame after. Joining plays the lobby's join
+  sound (`mp_player_join`), which `PartyHost_AddLocalPlayer` does not; leaving
+  plays the leave sound through `PartyHost_RemoveMember` itself.
 - In a party another machine hosts, a player who joins is sent to the host
   with the title's own `memberJoin`, from his controller, once the party lists
   the first player, and again every three seconds until it lists him. The
@@ -286,8 +288,13 @@ of this machine in an Xbox LIVE party and match through it:
   beside its first: the member found for what the machine sends is its first
   player, he is heard from whenever the first is (the party's 12-second
   timeout), and he is put in each party the host hosts that has the first.
-  Leaving there takes effect on that machine alone: the host keeps him until
-  the machine leaves the party. Every machine finds the host himself for
+  Leaving there sends the host the title's goodbye, `dis`, with his XUID
+  after it; the host removes that player alone, if he is one of the sender's
+  players beside its first (by the sender's IP). A plain `dis` is the machine
+  leaving, as in the title, and the players beside its first leave with the
+  first. The program ending (the window closed) sends both before it stops,
+  so the lobbies there drop this machine's players at once instead of at the
+  12-second timeout. Every machine finds the host himself for
   what arrives from the host's address: partystate names the host's member
   (+5200), and a member found at that address who is not he -- another player
   of the host's machine, in a slot before his -- is taken for a new host to
