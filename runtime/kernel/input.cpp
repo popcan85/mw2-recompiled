@@ -11,6 +11,7 @@
 #include "../signin.h"
 #include "../split_live.h"
 #include "../unlock_all.h"
+#include "../benchmark.h"
 #include "../stutters.h"
 #include "../gpu/vulkan/renderer.h"
 
@@ -317,6 +318,7 @@ PPC_FUNC(__imp__XamInputGetState)
     console::Pump(ctx, base);
     splitlive::Frame(ctx, base);
     unlockall::Frame(ctx, base);
+    benchmark::Frame(ctx, base);
 
     uint32_t user  = ctx.r3.u32;
     uint32_t sAddr = ctx.r5.u32;
@@ -327,7 +329,7 @@ PPC_FUNC(__imp__XamInputGetState)
     if (user >= 4) { *out = XInputState{}; ctx.r3.u64 = X_ERROR_DEVICE_NOT_CONNECTED; return; }
     SDL_Gamepad* pad = PadFor(user);
     const uint16_t elsewhere = uint16_t((user == 0 ? KeyboardButtons() : 0) | ScriptedButtons(user));
-    if (pad || elsewhere || (user ? g_scripted[user] : ScriptedAxesHeld(0) || player::Wanted()))
+    if (pad || elsewhere || benchmark::Drives(user) || (user ? g_scripted[user] : ScriptedAxesHeld(0) || player::Wanted()))
     {
 
         if (pad) SDL_UpdateGamepads();
@@ -413,6 +415,7 @@ PPC_FUNC(__imp__XamInputGetState)
             axes[0] = axes[1] = axes[2] = axes[3] = 0;
         }
         b &= uint16_t(~splitlive::Input(user, b));
+        benchmark::Drive(user, b, axes);
 
         Latch& latch = g_latch[user];
         const bool changed = latch.buttons != b ||
@@ -450,7 +453,7 @@ PPC_FUNC(__imp__XamInputGetCapabilities)
     auto* caps = GuestPtr<XInputCapabilities>(ctx.r5.u32);
     if (!caps) { ctx.r3.u64 = X_ERROR_DEVICE_NOT_CONNECTED; return; }
 #ifdef MW2_USE_SDL
-    if (PadFor(user) || (user < 4 && g_scripted[user]) || (user == 0 && player::Wanted()))
+    if (PadFor(user) || (user < 4 && g_scripted[user]) || (user == 0 && player::Wanted()) || benchmark::Drives(user))
     {
         // What a wired 360 pad reports: every control it has at full range,
         // and both motors.

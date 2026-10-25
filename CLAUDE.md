@@ -242,8 +242,24 @@ system-link split-screen; report approach, risks, odds.
     Ring consumer 51% busy. Per-view scene size in split screen not yet measured.
     Proposed AUTO graphics (awaiting the user's go-ahead): launcher picks shape/scale/
     MSAA/FPS from display + GPU; the game records in-play fps per player count; the
-    launcher steps settings down/up next start. First step: user measures fps at
-    RESOLUTION 2560x1440 (+ANTIALIASING 4X) with 4 players.
+    launcher steps settings down/up next start. User preferred an on-demand benchmark
+    (OPTIMISE in the launcher's graphics screen: confirm target fps from the display,
+    players on this PC, run, adjust between runs, show result; per-player-count results).
+  - Benchmark prototype WORKS (runtime/benchmark.cpp, MW2_BENCHMARK=<players>,
+    _MAP (mp_terminal), _SECONDS (15), _OUT (benchmark.txt)): waits for menu "main",
+    runs the Split Screen menu's commands, signin::SignInTemporary for 2-4, runs
+    makeLocalClientActive per controller, "map mp_terminal"; drives the pads (A while a
+    visible team/class menu shows, right stick 18000); XamInputGetCapabilities must say
+    connected for driven pads; Menu_Paint (822F1E80) returns whether it drew (it is
+    called for hidden menus too). ~40 s a run. Test folder builds\bench-test (own saves).
+  - MEASURED here (9800X3D + 5080, uncapped, Terminal): 4p 720p/2x 182 fps (1% 69),
+    4p 1440p/4x 177 (1% 65); 1p 220, 2p 228 (720p). => NOT GPU-bound: graphics are
+    nearly free on this PC; the CPU side caps fps (ring consumer 68% busy at 4p).
+    Per-view scene is 512x300 of 640x360 in 4p (the title's usual 80%, as 1024x600/1280x720).
+  - A change of MW2_SCALE makes the game hand over to the launcher to recompile all
+    shaders (~1-2 min; marker shaders/compiled.txt records the scale; MSAA does not
+    matter). Optimiser should keep a cache per scale. bench-test shares
+    stage0-stock\shaders (now scale 1, which the kits use).
   Parked: split-screen performance (title lowers resolution/fidelity in split screen;
   GPU ~53%, ~130 fps); 3+ PCs untested (non-host PCs' extras seen by each other);
   merging upstream acd414a.

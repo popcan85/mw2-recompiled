@@ -502,6 +502,15 @@ void signin::SignOut(uint32_t user)
     kernel::PostNotification(XN_SYS_SIGNINCHANGED, MaskLocked());
 }
 
+void signin::SignInTemporary(uint32_t user, const std::string& name)
+{
+    if (user == 0 || user >= kUsers) return;
+    std::lock_guard lock(g_lock);
+    g_players[user] = { true, 0xBE0000000000ull | user, name };
+    LOGI("signin: controller %u signs in as %s, for this run only", user, name.c_str());
+    kernel::PostNotification(XN_SYS_SIGNINCHANGED, MaskLocked());
+}
+
 #ifdef MW2_SIGNIN_PICTURE
 namespace
 {

@@ -60,6 +60,7 @@
 // only the players in the game are active.
 #include <ppc_recomp_shared.h>
 #include "split_live.h"
+#include "benchmark.h"
 #include "env.h"
 #include "guest.h"
 #include "log.h"
@@ -1306,6 +1307,8 @@ GUEST_HOOK(T_UI_MenuPaint)
 {
     const uint32_t menu = ctx.r4.u32;
     GUEST_ORIG(T_UI_MenuPaint)(ctx, base);
+    // (It returns whether the menu was drawn: it is called for hidden ones too.)
+    if (benchmark::On() && menu && ctx.r3.u8) benchmark::MenuPainted(GuestAnsi(*GuestPtr<be32>(menu)).c_str());
     if (!splitlive::On() || !g_lobby || signin::Open() || *GuestPtr<be32>(T_DATA_LocalClientCount) != 0) return;
     const std::string name = menu ? GuestAnsi(*GuestPtr<be32>(menu)) : std::string();
     if (name == "menu_xboxlive" || name == "menu_xboxlive_lobby" || name == "menu_xboxlive_privatelobby")
@@ -1455,7 +1458,7 @@ bool splitlive::PacketForAnother(uint32_t, uint32_t) { return false; }
 
 bool splitlive::On()
 {
-    static const bool on = env::Flag("MW2_SPLIT_LIVE") && online::Live();
+    static const bool on = env::Flag("MW2_SPLIT_LIVE") && online::Live() && !benchmark::On();
     return on;
 }
 

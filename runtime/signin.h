@@ -57,6 +57,9 @@ namespace signin
     bool Open();
     // Signs the player at controller 1, 2 or 3 out, as choosing "Sign out" does.
     void SignOut(uint32_t user);
+    // Signs a profile in at controller 1, 2 or 3 for this run only, kept in no
+    // file (MW2_BENCHMARK's players).
+    void SignInTemporary(uint32_t user, const std::string& name);
 
     // What a controller holds, at every read of it (XINPUT_GAMEPAD buttons,
     // a stick pushed up or down counted as the d-pad, and kGuide). True when
