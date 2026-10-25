@@ -168,6 +168,13 @@ system-link split-screen; report approach, risks, odds.
     client_packet_sender's CL_PacketEvent refuses packets for another client
     (PacketForAnother); server's FindClientByAddr hook prefers the exact port.
     Rebuilt into both kits. (The challengeResponse tagging stays.)
+  - USER CONFIRMED (2026-10-24): two PCs, 4 + 2 players, one private match. Committed
+    b645d9e (not pushed).
+  - Controller reconnect bug (8BitDo on PC2, Pro on PC1; Xbox fine): input.cpp PadFor
+    opened ids[user], so after a drop slot 0 took slot 1's pad (one pad drove two slots:
+    START started the match and opened sign-in at once) and the returning pad, last in
+    the list, got no slot. Now a free slot takes the first pad no other slot has. Staged
+    as mw2-mp-new.exe / mw2-mp-stage2d-new.exe (launchers swap them in). NOT yet tested.
     Tabled by user: PC1's joining player 2 makes no join sound (leave sound plays; we use
     AddLocalPlayer now; sound source not found yet); a PC that quits stays listed ~12 s
     (party timeout) -- faster would be nicer; split-screen performance.

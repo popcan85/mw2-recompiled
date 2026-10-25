@@ -112,11 +112,21 @@ namespace
         {
             lastLook[user] = now;
             if (user == 0) SayDevices();
+            // The first controller no other user has: one that comes back after
+            // dropping out takes the place it left, and the others keep theirs.
+            // (The one at this user's own place in the list could be another
+            // user's, and one that came back, last in the list, nobody's.)
             int count = 0;
             SDL_JoystickID* ids = SDL_GetGamepads(&count);
             if (ids)
             {
-                if (int(user) < count) g_pads[user] = SDL_OpenGamepad(ids[user]);
+                for (int i = 0; i < count && !g_pads[user]; i++)
+                {
+                    bool taken = false;
+                    for (uint32_t other = 0; other < 4; other++)
+                        taken = taken || (other != user && g_pads[other] && SDL_GetGamepadID(g_pads[other]) == ids[i]);
+                    if (!taken) g_pads[user] = SDL_OpenGamepad(ids[i]);
+                }
                 SDL_free(ids);
             }
             if (g_pads[user])
