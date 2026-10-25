@@ -173,13 +173,32 @@ system-link split-screen; report approach, risks, odds.
   - Controller reconnect bug (8BitDo on PC2, Pro on PC1; Xbox fine): input.cpp PadFor
     opened ids[user], so after a drop slot 0 took slot 1's pad (one pad drove two slots:
     START started the match and opened sign-in at once) and the returning pad, last in
-    the list, got no slot. Now a free slot takes the first pad no other slot has. Staged
-    as mw2-mp-new.exe / mw2-mp-stage2d-new.exe (launchers swap them in). NOT yet tested.
-    Tabled by user: PC1's joining player 2 makes no join sound (leave sound plays; we use
-    AddLocalPlayer now; sound source not found yet); a PC that quits stays listed ~12 s
-    (party timeout) -- faster would be nicer; split-screen performance.
-  OPEN: user's two-PC test (again); leaving on PC2 is local only (host keeps him until PC2
-  leaves); then release build + kits, final docs, commit, push.
+    the list, got no slot. Now a free slot takes the first pad no other slot has
+    (committed ff01fdf). NOT yet tested.
+  - Prompts/controller icons drew over popups (Summary): now drawn from Menu_Paint
+    (822EE7F0) after menu_xboxlive / _lobby / _privatelobby, so popups cover/dim them.
+    Both kits have this build (also the reconnect fix); committed 442ade7. NOT yet tested.
+  - Upstream (PaulCombal, sole author) moved 1 commit past b2ebb69 (acd414a, 4:3 aspect,
+    none of our files). User deciding: personal fork vs offering upstream (advised: keep
+    the fork, merge upstream regularly; offer the reconnect fix as a first small PR, ask
+    in an issue before the big split-screen PR, say it is AI-assisted; unlock-all stays
+    in the fork).
+  NEXT SESSION (stage 2 polish; current builds: PC1 `builds\stage2d-two-pc\launch.bat`,
+  PC2 `\\192.168.0.144\mw2\builds\pc2-kit\launch-stage2d.bat`, both diagnostic, both
+  launchers swap in a `*-new.exe` placed beside a running exe):
+  1. User to confirm the reconnect fix and the icons-under-popups fix.
+  2. Leaving on PC2 (Back held) is local only: the host keeps the player until PC2
+     leaves -> tell the host (e.g. a custom OOB, or the title's own member leave).
+  3. Controller icons in a joining PC's lobby (only the host draws rows from party1;
+     check PC2's rows/party).
+  4. PC1's joining player makes no join sound (we use AddLocalPlayer; find the sound).
+  5. A PC that quits stays listed ~12 s (party timeout, member+52) -- faster if possible.
+  6. connectResponse is still unowned between local clients (worked so far thanks to
+     per-client ports; check).
+  7. Then: release build + kits for both PCs, final docs, push the branch to origin.
+  Parked: split-screen performance (title lowers resolution/fidelity in split screen;
+  GPU ~53%, ~130 fps); 3+ PCs untested (non-host PCs' extras seen by each other);
+  merging upstream acd414a.
 - Never propose one game copy per player: the user wants native split screen only.
 - Diagnostic Windows builds needed `pthread` linked on Windows (clock_gettime).
 - New test builds can reuse an installed `game\` folder (junctions to stage0-stock);
