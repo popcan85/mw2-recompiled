@@ -21,8 +21,14 @@ The user tests on Windows PCs with real controllers; Claude does the engineering
 - ISO: `/mnt/c/AI/Projects/mw2/iso/Call of Duty - Modern Warfare 2 (USA, Europe).iso`
 - Title update 6 package: `~/mw2-assets/tu6/` (from the launcher's pinned codxenon URL)
 - llvm-mingw: `~/toolchains/llvm-mingw-20260922-ucrt-ubuntu-22.04-x86_64` (release.yml's version)
-- Test builds for the user: `C:\AI\Projects\mw2\builds\<stage>\` with a `launch.bat`
-  that sets `MW2_LOG_FILE=C:\AI\Projects\mw2\logs\mw2.log`.
+- Windows folder `C:\AI\Projects\mw2\` (cleaned up 2026-10-25; the old builds\ folder
+  and its stage kits are gone, so paths to builds\... below are history):
+  `MW2 Split Screen\` the user's install, latest build (desktop shortcut; update by
+  copying stripped mw2-sp/mw2-mp/mw2-launcher in), `Installer\` (MW2 Setup.exe,
+  READ ME.txt, ISO hard link), `dev\settings.env` (the setup's .env), `backups\`
+  (old saves), `iso\`, `logs\`. Throwaway test folders go in the scratchpad.
+  Repack: tools/make_setup.py ... /mnt/c/AI/Projects/mw2/dev/settings.env=.env ...
+  -> "/mnt/c/AI/Projects/mw2/Installer/MW2 Setup.exe".
 - Logs: `/mnt/c/AI/Projects/mw2/logs/` (`mw2.log` this PC, `mw2-pc2.log`... others).
 - PC2 (MARSHMELLOW, 192.168.0.144) shares its `C:\AI\Projects\mw2` as `\\192.168.0.144\mw2`
   (Git Bash: `//192.168.0.144/mw2`): put PC2's builds in `builds/pc2-kit/` there and read
