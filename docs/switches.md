@@ -19,6 +19,9 @@ pictures and sounds ADD MAP gives a converted map (MAPS → PC GAME chooses it).
 the launcher looks for Steam's copy once a run and writes the line when it finds one; an empty
 `MW2_PC_GAME=` says there is none. The environment's value decides over the file's
 ([maps.md](maps.md#inputs)).
+`MW2_INSTALL_DISC=<disc image>` makes the launcher, opened with no game installed, install from
+that image at once, as if it were chosen with INSTALL GAME; `mw2-setup` writes it, naming the image
+beside it ([building.md](building.md#a-setup-beside-the-disc)).
 
 Switches marked **R** are read by every build. The rest are diagnostic: a build
 without diagnostics (`RELEASE=1 ./build.sh`, `-DMW2_DIAGNOSTICS=OFF`) treats

@@ -1499,6 +1499,11 @@ namespace
         auto pictures = std::make_unique<Pictures>();
 
         app.state = setup::Detect();
+        // MW2_INSTALL_DISC: the disc image a copy with no game installed yet is
+        // installed from at once, as if chosen with INSTALL GAME (mw2-setup
+        // leaves it in .env, naming the image beside it).
+        if (const char* disc = std::getenv("MW2_INSTALL_DISC"); disc && *disc && app.state == setup::State::NotInstalled)
+            app.Take(Action::Install, disc);
         sound::Load();
         app.updated = updated;
         app.pendingReport = report::Pending() && !GameRunning();

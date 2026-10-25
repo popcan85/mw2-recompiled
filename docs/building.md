@@ -355,6 +355,27 @@ the host's clang-18. The executable needs nothing beside it:
 
 It needs Windows 10 1803 or later, for the placeholder mapping of guest memory.
 
+## A setup beside the disc
+
+`mw2-setup.exe` (`installer/main.cpp`, built with the Windows launcher) makes
+a copy of the game from one program put beside the disc image. It carries the
+files `tools/make_setup.py` appends to it:
+
+    tools/make_setup.py build-win-mp-release/mw2-setup.exe "MW2 Setup.exe" \
+        build-win-release/mw2.exe=mw2-sp.exe build-win-mp-release/mw2.exe=mw2-mp.exe \
+        build-win-mp-release/mw2-launcher.exe README.md LICENSE \
+        third_party/fonts/OFL.txt=FONT-LICENSE.txt settings.env=.env \
+        [TU_10LC20N_0000018000000.00000000001GA]
+
+Run, it asks to install in its own folder, writes the files there and starts
+the launcher, which installs from the image (`MW2_INSTALL_DISC`, which setup
+adds to `.env`). The `.env` it carries is merged into the folder's: a switch
+already there keeps its value. With the title update's package among the
+files, the install needs no connection; the package is Activision's, so a
+setup that carries it is for the people who own the disc, not for publishing.
+Run again in a folder with the game installed, it replaces the programs and
+starts the launcher.
+
 ## Release workflow
 
 `.github/workflows/release.yml` runs by hand from the Actions tab with a version

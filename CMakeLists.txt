@@ -500,6 +500,16 @@ if(MW2_USE_SDL)
         endif()
     endif()
 
+    # The setup a copy of the game is made from beside the disc image
+    # (installer/): it carries the programs tools/make_setup.py appends to it.
+    if(WIN32)
+        add_executable(setup WIN32 "${CMAKE_SOURCE_DIR}/installer/main.cpp" "${CMAKE_SOURCE_DIR}/launcher/icon/launcher.rc")
+        set_target_properties(setup PROPERTIES OUTPUT_NAME mw2-setup)
+        target_compile_definitions(setup PRIVATE NOMINMAX UNICODE _UNICODE)
+        target_link_libraries(setup PRIVATE ole32 shell32 uuid)
+        target_link_options(setup PRIVATE -static -municode -mwindows)
+    endif()
+
     # The launcher's fastfile reader on its own: every shader of the files it
     # is given, to check the reader against the game's files.
     if(NOT WIN32)

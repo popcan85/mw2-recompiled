@@ -215,7 +215,18 @@ system-link split-screen; report approach, risks, odds.
      them over if not done yet). Docs: per-client ports, challenge key, ConnectFromParty,
      tested scope and limits. Branch pushed to origin.
   STAGE 2 DONE (user confirmed 4+2 players across two PCs, polish confirmed).
-  NEXT: stage 3 (investigate only, see Stages), or the parked items.
+  Stage 3 dropped (user, 2026-10-25): 4 per PC already works; System Link not wanted
+  (no pre-game lobby there); Xbox LIVE private match stays the way in.
+- One-file setup (2026-10-25, user asked): `installer/main.cpp` -> mw2-setup.exe (CMake
+  target `setup`, Windows). tools/make_setup.py appends a payload (sp, mp, launcher, docs,
+  .env with SPLIT_LIVE/LAN_ACCEPT/UNLOCK_ALL, TU6 package -> offline install). Setup
+  installs into ITS OWN folder (user's choice), merges .env, writes
+  MW2_INSTALL_DISC=<iso beside it>, desktop shortcut "MW2 Split Screen", starts the
+  launcher, which installs from that disc at once (new launcher switch). SP release
+  build is `build-win-release/` (first SP build here, REGENERATE=1).
+  Package: `builds\installer\MW2 Setup.exe` (+ READ ME.txt, settings in
+  builds\installer-files\settings.env). Test folder `builds\setup-test\` (setup +
+  hard link to the ISO). NOT yet tested by the user; not pushed.
   Parked: split-screen performance (title lowers resolution/fidelity in split screen;
   GPU ~53%, ~130 fps); 3+ PCs untested (non-host PCs' extras seen by each other);
   merging upstream acd414a.
