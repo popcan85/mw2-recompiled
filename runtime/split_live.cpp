@@ -1026,7 +1026,7 @@ GUEST_HOOK(T_Session_RegisterUser)
 }
 #endif
 
-#if defined(T_CL_DrawScreen2D) && defined(T_R_AddCmdDrawText) && defined(T_R_DrawStretchPic)
+#if defined(T_UI_MenuPaint) && defined(T_R_AddCmdDrawText) && defined(T_R_DrawStretchPic)
 namespace
 {
     // A pad was read at `user` within the last second: one is connected there.
@@ -1183,13 +1183,17 @@ namespace
     }
 }
 
-// The frame's menus and console drawn: the join prompts over them. Not once
-// the local clients are set up for a game (there are none in the lobby):
-// the loading screen and the game have no lobby to join.
-GUEST_HOOK(T_CL_DrawScreen2D)
+// A lobby's menu drawn: the join prompts and the controllers with it, under
+// whatever opens above it, as the rest of the lobby is. Not once the local
+// clients are set up for a game (there are none in the lobby): the loading
+// screen and the game have no lobby to join.
+GUEST_HOOK(T_UI_MenuPaint)
 {
-    GUEST_ORIG(T_CL_DrawScreen2D)(ctx, base);
-    if (splitlive::On() && g_lobby && !signin::Open() && *GuestPtr<be32>(T_DATA_LocalClientCount) == 0)
+    const uint32_t menu = ctx.r4.u32;
+    GUEST_ORIG(T_UI_MenuPaint)(ctx, base);
+    if (!splitlive::On() || !g_lobby || signin::Open() || *GuestPtr<be32>(T_DATA_LocalClientCount) != 0) return;
+    const std::string name = menu ? GuestAnsi(*GuestPtr<be32>(menu)) : std::string();
+    if (name == "menu_xboxlive" || name == "menu_xboxlive_lobby" || name == "menu_xboxlive_privatelobby")
         Prompts(ctx, base);
 }
 #endif
