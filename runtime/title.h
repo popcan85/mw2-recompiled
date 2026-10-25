@@ -300,6 +300,10 @@
 // It also sizes the server's hunk (sub_822BF890), which reads `splitscreen`
 // as well: four clients' room when set, sv_maxclients' otherwise.
 #define T_CL_InitLocalClients     82188A58
+// CL_ConnectFromParty(localClientNum, server address, ...) disconnects every
+// local client, sets them up again and connects every active one (connection
+// state 3); the title calls it for each active local client in turn.
+#define T_CL_ConnectFromParty     82189C30
 // Session_RegisterUser(controller, session, xuid, private, slot, natType, ?,
 // address, stack: one more) puts a player in one of a session's 18 slots
 // ("Registering xuid %llx at slot %i ..."), which is where SV_DirectConnect
@@ -315,8 +319,8 @@
 #define T_SESSION_PUBLIC          556u
 // The two parties (Party_StopParty's partyId 0 and 1), each keeping its
 // session at +0, 18 members of 192 bytes from +64 (a member's slot is his
-// session slot), this machine's member at +5200 and whether it hosts at
-// +5340. A member: status at +0 (3 and up in the party), name at +2 (32),
+// session slot), the host's member at +5200 (this machine's when it hosts;
+// partystate tells the others) and whether it hosts at +5340. A member: status at +0 (3 and up in the party), name at +2 (32),
 // clan tag at +34, 8 bytes of his machine's at +108, the xuid at +176; the
 // rest is what PartyHost_AddPlayerAtSlot (party, slot, address, &xuid, &8
 // bytes, name, clan tag; on the stack his details) puts there. PartyHost_
@@ -326,7 +330,7 @@
 #define T_DATA_Party1             0x825B5C18u
 #define T_PARTY_MEMBERS           64u
 #define T_PARTY_MEMBER_SIZE       192u
-#define T_PARTY_ME                5200u
+#define T_PARTY_HOST              5200u
 #define T_PARTY_HOSTING           5340u
 #define T_MEMBER_NAME             2u
 #define T_MEMBER_CLANTAG          34u
@@ -365,6 +369,35 @@
 #define T_Party_RefreshLocalMembers 821A30D8
 #define T_Party_SendMemberJoin    82198798
 #define T_PartyHost_HandleMemberJoin 821A6F48
+// A machine's joinParty reserves as many slots as it brings players:
+// PartyHost_ReserveSlot(party, slot, &address, challenge) makes the member
+// status 2 with the challenge's 6 bytes at +44, and memberJoin claims the
+// reserved slot its argv[1] names ("Challenge key did not match" otherwise).
+#define T_PartyHost_ReserveSlot   821A05E0
+// A game's connection handshake. Each local client asks the server with
+// `getchallenge 0 "<key>"`, its key made by CL_ChallengeKey(localClientNum,
+// buffer); SV_GetChallenge keeps a challenge per address and key (the
+// server's tokenized args at T_DATA_SvCmdArgs, laid out as T_DATA_CmdArgs)
+// and answers `challengeResponse <challenge>` with NET_OutOfBandPrint(sock,
+// address (8 bytes, then 4 in the high word), text). The answer does not say
+// whose it is.
+#define T_CL_ChallengeKey         82183D58
+#define T_SV_GetChallenge         822BA9B8
+#define T_DATA_SvCmdArgs          0x830ABA98u
+#define T_NET_OutOfBandPrint      8228EE28
+// NET_SendPacket(sock, length, data, address): the socket is the local
+// client's number (the server's is 4) and is dropped on the way to the
+// socket the title has, one for every local client. SV_FindClientByAddr
+// (address, 0, 0) is the first server client at an address's IP, the port
+// not compared: the server's clients, T_DATA_SvClientCount of them from
+// T_DATA_SvClients, 0x97F80 bytes each, in use when +0 is not 0, the
+// address at +40.
+#define T_NET_SendPacket          8228EBF0
+#define T_SV_FindClientByAddr     822C1918
+#define T_DATA_SvClientCount      0x8367A018u
+#define T_DATA_SvClients          0x8367A01Cu
+#define T_SV_CLIENT_SIZE          0x97F80u
+#define T_SV_CLIENT_ADDRESS       40u
 #define T_Live_XuidIsLocal        823380C0
 #define T_Live_ProfileName        82337B00
 #define T_Live_Xuid               8233B648

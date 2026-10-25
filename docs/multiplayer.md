@@ -287,7 +287,11 @@ of this machine in an Xbox LIVE party and match through it:
   player, he is heard from whenever the first is (the party's 12-second
   timeout), and he is put in each party the host hosts that has the first.
   Leaving there takes effect on that machine alone: the host keeps him until
-  the machine leaves the party.
+  the machine leaves the party. Every machine finds the host himself for
+  what arrives from the host's address: partystate names the host's member
+  (+5200), and a member found at that address who is not he -- another player
+  of the host's machine, in a slot before his -- is taken for a new host to
+  migrate to ("Unable to migrate hosts").
 - The local clients' setup reads `splitscreen` from a copy of the dvar that
   says set, and makes four; the real dvar is untouched, and the server's hunk,
   sized in the same setup, reads the real one (sv_maxclients' room). Each

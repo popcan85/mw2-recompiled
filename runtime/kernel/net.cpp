@@ -20,6 +20,7 @@
 #include "../env.h"
 #include "../diagnostics.h"
 #include "../online/service.h"
+#include "../split_live.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -552,8 +553,11 @@ PPC_FUNC(__imp__NetDll_sendto)
         }
         else if (PeerAt(to, peer))
         {
-            service->Send(peer, socket.port, port, buffer, ctx.r6.u32);
-            Trace("send", peer, socket.port, port, buffer, ctx.r6.u32);
+            // A local client beside the first sends from a port of its own
+            // (split_live.h), as if it were another machine.
+            const uint16_t from = uint16_t(socket.port + splitlive::kPortStep * splitlive::SendingClient());
+            service->Send(peer, from, port, buffer, ctx.r6.u32);
+            Trace("send", peer, from, port, buffer, ctx.r6.u32);
         }
         else if (to == kLoopback)
         {
@@ -596,12 +600,22 @@ PPC_FUNC(__imp__NetDll_recvfrom)
                 self = true;
             }
         }
-        if (!self && !(port && service->Receive(port, datagram)))
+        // The machine's port, then those of the local clients beside the first.
+        uint32_t forClient = 0;
+        bool arrived = self || (port && service->Receive(port, datagram));
+        for (uint32_t client = 1; !arrived && port && splitlive::On() && client < 4; client++)
+            if (service->Receive(uint16_t(port + splitlive::kPortStep * client), datagram))
+            {
+                arrived = true;
+                forClient = client;
+            }
+        if (!arrived)
         {
             t_lastError = 10035;   // WSAEWOULDBLOCK: the title's sockets never block
             ctx.r3.u64 = uint32_t(-1);
             return;
         }
+        splitlive::ReceivedFor(forClient);
         if (!self)
             Trace("receive", datagram.from, datagram.fromPort, datagram.toPort,
                   datagram.bytes.data(), datagram.bytes.size());

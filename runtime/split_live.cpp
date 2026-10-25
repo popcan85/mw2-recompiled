@@ -226,7 +226,7 @@ namespace
         char part[96];
         for (uint32_t party : kParties)
         {
-            const uint32_t me = *GuestPtr<be32>(party + T_PARTY_ME);
+            const uint32_t me = *GuestPtr<be32>(party + T_PARTY_HOST);
             std::snprintf(part, sizeof part, " | party %08x%s:", party, Hosting(party) ? " (hosting)" : "");
             text += part;
             for (uint32_t i = 0; i < T_SESSION_SLOTS; i++)
@@ -271,7 +271,7 @@ namespace
     void AddToParty(PPCContext& ctx, uint8_t* base, uint32_t party, uint32_t user)
     {
         const uint64_t xuid = kernel::LiveXuid(user);
-        const uint32_t me = *GuestPtr<be32>(party + T_PARTY_ME);
+        const uint32_t me = *GuestPtr<be32>(party + T_PARTY_HOST);
         if (!xuid || !Hosting(party) || !*GuestPtr<be32>(party) || me >= T_SESSION_SLOTS || MemberOf(party, xuid) >= 0) return;
         if (*GuestPtr<uint8_t>(Member(party, me)) < kInParty) return;
         const int32_t slot = FreeSlot(party);
@@ -352,7 +352,7 @@ namespace
     {
         const uint64_t xuid = kernel::LiveXuid(user);
         const int32_t slot = xuid && Hosting(party) ? MemberOf(party, xuid) : -1;
-        if (slot < 0 || uint32_t(slot) == uint32_t(*GuestPtr<be32>(party + T_PARTY_ME))) return;
+        if (slot < 0 || uint32_t(slot) == uint32_t(*GuestPtr<be32>(party + T_PARTY_HOST))) return;
         const PPCContext saved = ctx;
         ctx.r1.u64 = (ctx.r1.u32 - 0x400) & ~0xFull;
         ctx.r3.u64 = party;
@@ -450,6 +450,10 @@ namespace
         for (uint32_t party : kParties) RemoveFromParty(ctx, base, party, user);
         Run(ctx, base, user, "makeLocalClientInactive");
         // Out of the game, out of his profile: START signs in again, as anyone.
+        // Signing in made his controller the menus'; were it still, the title
+        // would take his signing out for the first player's.
+        *GuestPtr<be32>(T_DATA_PrimaryController) = uint32_t(kFirst);
+        *GuestPtr<be32>(T_DATA_MenuController) = uint32_t(kFirst);
         signin::SignOut(user);
     }
 
@@ -521,20 +525,41 @@ namespace
         ctx.r8.u64 = xuid;
         ctx.r9.u64 = name;
         ctx.r10.u64 = clan;
+        // The call also marks the party as joining (+5288 to +5311), as the
+        // first player's memberJoin does. This machine is in the party already,
+        // and a party that thinks it is joining sends joinParty again, on which
+        // the host drops every member of this machine.
+        uint8_t joining[24];
+        std::memcpy(joining, GuestPtr<uint8_t>(party + 5288), sizeof joining);
         g_sending = true;
         GUEST_FUNC(T_Party_SendMemberJoin)(ctx, base);
         g_sending = false;
+        std::memcpy(GuestPtr<uint8_t>(party + 5288), joining, sizeof joining);
         ctx = saved;
         LOGI("splitlive: controller %u (\"%s\", xuid %016llx) sent to the host of party %08x (memberJoin)", user,
              GuestAnsi(name).c_str(), (unsigned long long)xuid, party);
     }
 
+    // A controller's stats are read in (and, with MW2_UNLOCK_ALL, changed: that
+    // is done the frame they are read), as of a frame before this one.
+    bool StatsIn(uint32_t user)
+    {
+        static bool seen[signin::kUsers]{};
+        const bool in = *GuestPtr<uint8_t>(T_DATA_Stats + user * T_STATS_STRIDE + T_STATS_READ) != 0;
+        const bool was = seen[user];
+        seen[user] = in;
+        return in && was;
+    }
+
     // In a party another machine hosts: the players in the game beside the
-    // first are sent to the host once the party lists the first, and again
-    // every few seconds until it lists them.
+    // first are sent to the host once the party lists the first and their
+    // stats are in (memberJoin carries their rank), and again every few
+    // seconds until it lists them.
     void SendJoined(PPCContext& ctx, uint8_t* base)
     {
         const auto now = std::chrono::steady_clock::now();
+        bool statsIn[signin::kUsers]{};
+        for (uint32_t user = 1; user < signin::kUsers; user++) statsIn[user] = StatsIn(user);
         for (uint32_t party : kParties)
         {
             const int index = PartyIndex(party);
@@ -544,7 +569,7 @@ namespace
             for (uint32_t user = 1; user < signin::kUsers; user++)
             {
                 const uint64_t xuid = kernel::LiveXuid(user);
-                if (!g_joined[user] || !xuid || MemberOf(party, xuid) >= 0) continue;
+                if (!g_joined[user] || !xuid || !statsIn[user] || MemberOf(party, xuid) >= 0) continue;
                 if (now - g_sentAt[index][user] < kAgain) continue;
                 g_sentAt[index][user] = now;
                 SendMemberJoin(ctx, base, party, user);
@@ -584,29 +609,64 @@ namespace
 }
 
 #ifdef T_Party_FindMemberByAddr
-GUEST_HOOK(T_Party_FindMemberByAddr)
+PPC_FUNC_IMPL(GUEST_ORIG(T_Party_FindMemberByAddr));
+
+namespace
 {
-    const PPCContext call = ctx;
-    GUEST_ORIG(T_Party_FindMemberByAddr)(ctx, base);
-    if (!splitlive::On()) return;
+    // A player beside his machine's first being added (memberJoin): nobody is
+    // at his machine's address until he is, or the handler takes his message
+    // for the first player's details and adds nobody.
+    struct Adding
+    {
+        bool on = false;
+        uint32_t party = 0;
+        uint64_t xuid = 0, address = 0, address2 = 0;
+    } g_adding;
+
     // Past a machine's players beside its first, to the next member at the
     // address. With nobody else there, another machine's player beside its
     // first is the one, so that a machine leaving takes him along.
-    const PPCContext found = ctx;
-    const bool other = Beside(call.r3.u32, found.r3.s32) && g_beside.count(XuidAt(call.r3.u32, found.r3.u32));
-    while (Beside(call.r3.u32, ctx.r3.s32))
+    void PassBeside(PPCContext& ctx, uint8_t* base, const PPCContext& call)
     {
-        const int32_t past = ctx.r3.s32;
-        ctx = call;
-        ctx.r6.u64 = uint32_t(past + 1);
-        if (past + 1 < int32_t(T_SESSION_SLOTS)) GUEST_ORIG(T_Party_FindMemberByAddr)(ctx, base);
-        if (past + 1 >= int32_t(T_SESSION_SLOTS) || ctx.r3.s32 < 0 || ctx.r3.s32 <= past)   // the fallback walk found him again
+        const PPCContext found = ctx;
+        const bool other = Beside(call.r3.u32, found.r3.s32) && g_beside.count(XuidAt(call.r3.u32, found.r3.u32));
+        while (Beside(call.r3.u32, ctx.r3.s32))
         {
-            ctx = found;
-            if (!other) ctx.r3.s64 = -1;
-            return;
+            const int32_t past = ctx.r3.s32;
+            ctx = call;
+            ctx.r6.u64 = uint32_t(past + 1);
+            if (past + 1 < int32_t(T_SESSION_SLOTS)) GUEST_ORIG(T_Party_FindMemberByAddr)(ctx, base);
+            if (past + 1 >= int32_t(T_SESSION_SLOTS) || ctx.r3.s32 < 0 || ctx.r3.s32 <= past)   // the fallback walk found him again
+            {
+                ctx = found;
+                if (!other) ctx.r3.s64 = -1;
+                return;
+            }
         }
     }
+}
+
+GUEST_HOOK(T_Party_FindMemberByAddr)
+{
+    const PPCContext call = ctx;
+    if (g_adding.on && call.r3.u32 == g_adding.party && call.r4.u64 == g_adding.address &&
+        (call.r5.u64 >> 32) == (g_adding.address2 >> 32) && MemberOf(g_adding.party, g_adding.xuid) < 0)
+    {
+        ctx.r3.s64 = -1;
+        return;
+    }
+    GUEST_ORIG(T_Party_FindMemberByAddr)(ctx, base);
+    if (!splitlive::On()) return;
+    PassBeside(ctx, base, call);
+    // The host's machine's other players, as anyone sees them: what arrives
+    // from the host's address is the host's (partystate names him, and a
+    // member found there that is not him is taken for a new host).
+    const uint32_t party = call.r3.u32;
+    const int32_t found = ctx.r3.s32, host = int32_t(*GuestPtr<be32>(party + T_PARTY_HOST));
+    if (found < 0 || host < 0 || host >= int32_t(T_SESSION_SLOTS) || found == host) return;
+    if (*GuestPtr<uint8_t>(Member(party, uint32_t(host))) < kInParty) return;
+    const uint32_t a = AddressOf(party, uint32_t(found)), b = AddressOf(party, uint32_t(host));
+    if (a && b && std::memcmp(GuestPtr<uint8_t>(a), GuestPtr<uint8_t>(b), 12) == 0) ctx.r3.s64 = host;
 }
 #endif
 
@@ -720,12 +780,32 @@ GUEST_HOOK(T_PartyHost_HandleMemberJoin)
         return;
     }
     g_beside.insert(xuid);
+    // His machine's joinParty reserved a slot for its first player alone: one
+    // more, under the challenge he brings, as joinParty reserves them.
+    const int32_t slot = FreeSlot(party);
+    if (slot >= 0)
+    {
+        const uint32_t sp = (call.r1.u32 - 0x400) & ~0xFu;
+        const uint32_t address = sp + 0x200, challenge = sp + 0x220;
+        *GuestPtr<be64>(address) = call.r5.u64;
+        *GuestPtr<be32>(address + 8) = uint32_t(call.r6.u64 >> 32);
+        std::snprintf(GuestPtr<char>(challenge), 8, "%.5s", Argv(1).c_str());
+        ctx.r1.u64 = sp;
+        ctx.r3.u64 = party;
+        ctx.r4.u64 = uint32_t(slot);
+        ctx.r5.u64 = address;
+        ctx.r6.u64 = challenge;
+        GUEST_FUNC(T_PartyHost_ReserveSlot)(ctx, base);
+        ctx = call;
+    }
     char first[33]{};
     std::memcpy(first, GuestPtr<char>(Member(party, uint32_t(at)) + T_MEMBER_NAME), 32);
     auto taking = GuestPtr<be32>(party + T_PARTY_TAKING_MEMBERS);
     const uint32_t was = *taking;
     *taking = 1;
+    g_adding = { true, party, xuid, call.r5.u64, call.r6.u64 };
     GUEST_ORIG(T_PartyHost_HandleMemberJoin)(ctx, base);
+    g_adding = {};
     if (!was) *taking = 0;
     LOGI("splitlive: memberJoin for xuid %016llx from the machine of party %08x's member %d (\"%s\"): %s",
          (unsigned long long)xuid, party, at, first, MemberOf(party, xuid) >= 0 ? "added beside him" : "NOT added");
@@ -839,6 +919,39 @@ GUEST_HOOK(T_CL_InitLocalClients)
     LOGI("splitlive: local clients set up for Xbox LIVE (server running %u): %u before, %u now",
          running, before, uint32_t(*GuestPtr<be32>(T_DATA_LocalClientCount)));
 }
+
+#ifdef T_CL_ConnectFromParty
+// Joining another machine's game, the party's "go" calls CL_ConnectFromParty
+// for each active local client, and each call disconnects every active one,
+// gives each the server's address and starts the one it was called for
+// (connection state 3): only the last went in. So the first call starts them
+// all, and the calls for the others, already on their way in, are passed over.
+GUEST_HOOK(T_CL_ConnectFromParty)
+{
+    const uint32_t client = ctx.r3.u32;
+    auto state = [](uint32_t c) { return GuestPtr<be32>(T_DATA_ClientConnState + T_CONN_STATE_STRIDE * c); };
+    auto active = [](uint32_t c) { return *GuestPtr<uint8_t>(T_DATA_ClientUIActive + T_CONN_STATE_STRIDE * c) != 0; };
+    if (!splitlive::On() || client >= kClients)
+    {
+        GUEST_ORIG(T_CL_ConnectFromParty)(ctx, base);
+        return;
+    }
+    if (client > 0 && int32_t(*state(client)) > 0)
+    {
+        LOGI("splitlive: local client %u is connecting already (CL_ConnectFromParty passed over)", client);
+        return;
+    }
+    GUEST_ORIG(T_CL_ConnectFromParty)(ctx, base);
+    if (Bool(T_DATA_SvRunningDvar)) return;   // this machine's own game: its clients come in as it loads
+    constexpr uint32_t kChallenging = 3;
+    for (uint32_t other = 0; other < kClients; other++)
+        if (other != client && active(other) && int32_t(*state(other)) == 0)
+        {
+            *state(other) = kChallenging;
+            LOGI("splitlive: local client %u connecting beside local client %u", other, client);
+        }
+}
+#endif
 
 GUEST_HOOK(T_SV_InitHunk)
 {
@@ -1070,12 +1183,155 @@ namespace
     }
 }
 
-// The frame's menus and console drawn: the join prompts over them.
+// The frame's menus and console drawn: the join prompts over them. Not once
+// the local clients are set up for a game (there are none in the lobby):
+// the loading screen and the game have no lobby to join.
 GUEST_HOOK(T_CL_DrawScreen2D)
 {
     GUEST_ORIG(T_CL_DrawScreen2D)(ctx, base);
-    if (splitlive::On() && g_lobby && !signin::Open()) Prompts(ctx, base);
+    if (splitlive::On() && g_lobby && !signin::Open() && *GuestPtr<be32>(T_DATA_LocalClientCount) == 0)
+        Prompts(ctx, base);
 }
+#endif
+
+#if defined(T_SV_GetChallenge) && defined(T_NET_OutOfBandPrint) && defined(T_CL_ChallengeKey)
+namespace
+{
+    std::string g_challengeKey;   // the key of the getchallenge being answered
+
+    // argv[i] of a tokenized command (T_DATA_CmdArgs' layout), or "".
+    std::string Arg(uint32_t args, uint32_t i)
+    {
+        const uint32_t nest = *GuestPtr<be32>(args);
+        if (int32_t(*GuestPtr<be32>(args + 68 + nest * 4)) <= int32_t(i)) return {};
+        const uint32_t argv = *GuestPtr<be32>(args + 100 + nest * 4);
+        return GuestAnsi(*GuestPtr<be32>(argv + 4 * i));
+    }
+
+    // The key a local client asks a challenge with.
+    std::string ChallengeKey(PPCContext& ctx, uint8_t* base, uint32_t localClient)
+    {
+        const PPCContext saved = ctx;
+        const uint32_t sp = (ctx.r1.u32 - 0x200) & ~0xFu;
+        const uint32_t buffer = sp + 0x100;
+        std::memset(GuestPtr<uint8_t>(buffer), 0, 64);
+        ctx.r1.u64 = sp;
+        ctx.r3.u64 = localClient;
+        ctx.r4.u64 = buffer;
+        GUEST_FUNC(T_CL_ChallengeKey)(ctx, base);
+        ctx = saved;
+        return std::string(GuestPtr<char>(buffer), strnlen(GuestPtr<char>(buffer), 63));
+    }
+}
+
+// The server answers a getchallenge: the answer says whose key it is.
+GUEST_HOOK(T_SV_GetChallenge)
+{
+    if (splitlive::On()) g_challengeKey = Arg(T_DATA_SvCmdArgs, 2);
+    GUEST_ORIG(T_SV_GetChallenge)(ctx, base);
+    g_challengeKey.clear();
+}
+
+// `challengeResponse <challenge>` goes out as `challengeResponse <challenge>
+// <key>`; the title's own client reads the challenge alone.
+GUEST_HOOK(T_NET_OutOfBandPrint)
+{
+    const std::string text = GuestAnsi(ctx.r6.u32);
+    if (g_challengeKey.empty() || text.rfind("challengeResponse ", 0) != 0)
+    {
+        GUEST_ORIG(T_NET_OutOfBandPrint)(ctx, base);
+        return;
+    }
+    const std::string tagged = text + " " + g_challengeKey;
+    const uint32_t r1 = ctx.r1.u32;
+    const uint32_t sp = (r1 - 0x200) & ~0xFu;
+    std::snprintf(GuestPtr<char>(sp + 0x100), 0x100, "%s", tagged.c_str());
+    ctx.r1.u64 = sp;
+    ctx.r6.u64 = sp + 0x100;
+    GUEST_ORIG(T_NET_OutOfBandPrint)(ctx, base);
+    ctx.r1.u64 = r1;
+}
+
+bool splitlive::ForAnotherClient(PPCContext& ctx, uint8_t* base, uint32_t localClient)
+{
+    if (!On() || Arg(T_DATA_CmdArgs, 0) != "challengeResponse") return false;
+    const std::string key = Arg(T_DATA_CmdArgs, 2);
+    if (key.empty() || ChallengeKey(ctx, base, localClient) == key) return false;
+    // Another local client still asking for its challenge has that key.
+    constexpr int32_t kChallenging = 3;
+    for (uint32_t client = 0; client < kClients; client++)
+        if (client != localClient &&
+            int32_t(*GuestPtr<be32>(T_DATA_ClientConnState + T_CONN_STATE_STRIDE * client)) == kChallenging &&
+            ChallengeKey(ctx, base, client) == key)
+            return true;
+    return false;
+}
+#else
+bool splitlive::ForAnotherClient(PPCContext&, uint8_t*, uint32_t) { return false; }
+#endif
+
+namespace
+{
+    thread_local uint32_t t_sending = 0;   // the socket NET_SendPacket was called with
+    std::atomic<uint32_t> g_receivedFor{ 0 };
+}
+
+#if defined(T_NET_SendPacket) && defined(T_SV_FindClientByAddr)
+// Which local client is sending, for the socket underneath to send from its
+// port (kernel/net.cpp).
+GUEST_HOOK(T_NET_SendPacket)
+{
+    const uint32_t was = t_sending;
+    t_sending = ctx.r3.u32;
+    GUEST_ORIG(T_NET_SendPacket)(ctx, base);
+    t_sending = was;
+}
+
+// The server client at an address: the one at its IP and port, where several
+// local clients of one machine are there each at a port of its own.
+GUEST_HOOK(T_SV_FindClientByAddr)
+{
+    const uint64_t address = ctx.r3.u64;
+    const uint16_t port = uint16_t(ctx.r4.u64 >> 48);
+    GUEST_ORIG(T_SV_FindClientByAddr)(ctx, base);
+    const uint32_t found = ctx.r3.u32;
+    if (!splitlive::On() || !found || uint16_t(*GuestPtr<be16>(found + T_SV_CLIENT_ADDRESS + 8)) == port) return;
+    const uint32_t count = *GuestPtr<be32>(T_DATA_SvClientCount), clients = *GuestPtr<be32>(T_DATA_SvClients);
+    for (uint32_t i = 0; i < count && clients; i++)
+    {
+        const uint32_t client = clients + i * T_SV_CLIENT_SIZE;
+        if (*GuestPtr<be32>(client) && uint64_t(*GuestPtr<be64>(client + T_SV_CLIENT_ADDRESS)) == address &&
+            uint16_t(*GuestPtr<be16>(client + T_SV_CLIENT_ADDRESS + 8)) == port)
+        {
+            ctx.r3.u64 = client;
+            return;
+        }
+    }
+}
+
+uint32_t splitlive::SendingClient()
+{
+    return On() && t_sending > 0 && t_sending < kClients ? t_sending : 0;
+}
+
+void splitlive::ReceivedFor(uint32_t localClient) { g_receivedFor = localClient; }
+
+bool splitlive::PacketForAnother(uint32_t localClient, uint32_t addressType)
+{
+    constexpr uint32_t kIp = 4;
+    if (!On() || addressType != kIp || localClient >= kClients) return false;
+    const uint32_t to = g_receivedFor;
+    if (to) return localClient != to;
+    // To the machine's own port: not for a local client in a game at its own,
+    // unless this machine runs the game.
+    return localClient > 0 &&
+           int32_t(*GuestPtr<be32>(T_DATA_ClientConnState + T_CONN_STATE_STRIDE * localClient)) >= 3 &&
+           !Bool(T_DATA_SvRunningDvar);
+}
+#else
+uint32_t splitlive::SendingClient() { return 0; }
+void splitlive::ReceivedFor(uint32_t) {}
+bool splitlive::PacketForAnother(uint32_t, uint32_t) { return false; }
 #endif
 
 bool splitlive::On()
@@ -1123,9 +1379,14 @@ void splitlive::Frame(PPCContext& ctx, uint8_t* base)
 
     const bool lobby = InLobby(now);
     g_lobby = lobby;
-    // Out of Xbox LIVE (no party, no game), the players beside the first leave,
-    // their controllers given up as split screen gives them up.
-    if (!lobby && now.connection[0] == 0)
+    // Out of Xbox LIVE (no party, no game) for two seconds -- a party joining
+    // again is out for a moment -- the players beside the first leave, their
+    // controllers given up as split screen gives them up.
+    static std::chrono::steady_clock::time_point outSince;
+    const auto clock = std::chrono::steady_clock::now();
+    if (lobby || now.connection[0] != 0) outSince = {};
+    else if (outSince == std::chrono::steady_clock::time_point{}) outSince = clock;
+    if (outSince != std::chrono::steady_clock::time_point{} && clock - outSince >= std::chrono::seconds(2))
     {
         bool left = false;
         for (uint32_t user = 1; user < signin::kUsers; user++)

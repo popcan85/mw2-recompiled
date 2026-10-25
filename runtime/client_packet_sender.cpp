@@ -70,6 +70,8 @@
 #include "log.h"
 #include "guest.h"
 
+#include "split_live.h"
+
 #include <atomic>
 #include <cctype>
 #include <cstdint>
@@ -139,6 +141,11 @@ GUEST_HOOK(T_CL_PacketEvent)
         ctx.r3.u64 = 0;
         return;
     }
+    // MW2_SPLIT_LIVE: a packet that arrived at another local client's port.
+    if (splitlive::PacketForAnother(localClient, uint32_t(ctx.r4.u64 >> 32))) {
+        ctx.r3.u64 = 0;
+        return;
+    }
     GUEST_ORIG(T_CL_PacketEvent)(ctx, base);
 }
 
@@ -190,6 +197,11 @@ GUEST_HOOK(T_CL_ConnectionlessPacket)
     if (count && !SameAddress(ctx, base, ctx.r4.u64, ctx.r5.u64,
                               Connection(base, localClient) + T_CONNECTION_SERVER_ADR)) {
         Refused(name, ctx.r4.u64, ctx.r5.u64, *count);
+        ctx.r3.u64 = 0;
+        return;
+    }
+    // MW2_SPLIT_LIVE: another local client's challenge, on to the next.
+    if (splitlive::ForAnotherClient(ctx, base, localClient)) {
         ctx.r3.u64 = 0;
         return;
     }

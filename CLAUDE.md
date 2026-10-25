@@ -109,7 +109,69 @@ system-link split-screen; report approach, risks, odds.
     Sign-in screen: New profile opens an on-screen keyboard (suggested name), X renames a
     listed profile (RenameLocked rewrites profiles.txt). Player 1 rename: not in game yet.
     In `builds\stage2d-two-pc\`, NOT yet tested.
-  OPEN: user's two-PC test (next); leaving on PC2 is local only (host keeps him until PC2
+  - User CONFIRMED one-PC: 4 players in private match (Xbox One, Pro, PS4, DualSense),
+    names/ranks/unlock/sign-in keyboard all fine. Committed 06689c4 (not pushed).
+    Parked: (a) Pro Controller could not join when it was not controller 0 (START reached
+    the menus) -- need a log of that run; (b) split-screen performance (~130 fps, GPU 53%):
+    the title lowers resolution/fidelity in split screen; look later.
+  - PC2 kit: `\\192.168.0.144\mw2\builds\pc2-kit\launch-stage2d.bat` + mw2-mp-stage2d.exe
+    (SPLIT_LIVE, UNLOCK_ALL, diagnostic); PC2 saves backed up to pc2-kit\saves-backup-2026-10-24.
+  - Two-PC test 1: PC2 joined (fine while PC1 had 1 player), but with PC1's extra
+    "Todd" (slot 0, PC1's address) PC2 migrated: "Migrating the party over so clientNum 0
+    (Todd) is the new host" -> "Unable to migrate hosts". party+5200 is the HOST's slot
+    (sent in partystate), not "me" (renamed T_PARTY_HOST). FindMemberByAddr on every
+    machine now returns the host for a member at the host's address. Rebuilt into both
+    kits (PC1 stage2d-two-pc, PC2 launch-stage2d.bat). PC2's lobby also drew a
+    split-screen player card ("Todd") over the list -- recheck after this fix.
+  - Two-PC test 2: step 3 OK (no migration, cards fine). PC2's player 2 failed: PC1
+    "Challenge key did not match" (memberJoin claims a status-2 slot reserved by joinParty
+    with the challenge at member+44; PC2's joinParty asked room for 1) -> PC1 told PC2 to
+    rejoin -> joinParty cleared Eunbin. Also Party_SendMemberJoin marks PC2's party as
+    joining (+5288..5311) and PC2's 0.05 s out-of-lobby made Leave sign suuuuh out while
+    primary=1 -> "active profile signed out" -> main menu. Fixes: host reserves a slot
+    (PartyHost_ReserveSlot 821A05E0) under the extra's challenge before the handler;
+    SendMemberJoin restores +5288..5311; out-of-lobby leave needs 2 s; Leave resets
+    primary/menu controller to 0 before signing out. Rebuilt into both kits.
+  - Test 3: reserve+claim worked but the claim (821A6258) looks up a member at the
+    sender's address and, finding Eunbin, updates him instead of AddPlayerAtSlot; PC2
+    resent every 3 s (join sound loop). Fix: g_adding makes FindMemberByAddr return -1
+    for that address during the handler until the new XUID is a member.
+  - Test 4: LOBBY WORKS across PCs (PC2's 2nd player listed on both). Remaining: rank 1
+    for him (memberJoin sent before his stats read -> now waits for stats+8192 seen a
+    frame earlier); glyphs on PC2's loading screen (prompts now need LocalClientCount 0);
+    match start -> PC2 "EXE_BAD_CHALLENGE": challengeResponse carries no owner and PC2's
+    client 0 took client 1's challenge; SV_GetChallenge keys by address + key string.
+    Fix: server appends the getchallenge key to challengeResponse (hooks SV_GetChallenge
+    822BA9B8 + NET_OutOfBandPrint 8228EE28); client_packet_sender asks
+    splitlive::ForAnotherClient to pass it on. connectResponse has the same ambiguity
+    (not handled yet). Leaving on PC2 only local (known).
+  - Test 5: suuuuh joins at rank 70, match starts with no error, but only PC2's player 1
+    gets in: CL_ConnectFromParty re-runs CL_InitLocalClients per client and the re-init
+    disconnects all (the "already set up" check fails under the dvar copy), so connecting
+    client 1 dropped half-connected client 0; PC2 then reset and reconnected client 0
+    alone. Fix: hook skips the setup when not hosting, 4 clients exist and one is
+    connecting (state > 0). Test 6: same result -- CL_ConnectFromParty (82189C30) itself
+    disconnects all (sub_82189E40) then connects every active client; the title calls it
+    per client, so the 2nd call undid the 1st. Init skip removed; now ConnectFromParty is
+    passed over for a client > 0 already connecting. Test 7: no change -- the skip never
+    fired: each call disconnects all active clients (sub_821839F0), sets the server
+    address in every active client's connection, but state 3 only for the client called;
+    the party "go" (sub_8219B1E8) calls it for each active client, so only the last
+    survives. Now after the first call every other active client is set to state 3 (not
+    when sv_running), so later calls are passed over. PC1 (host) never calls it.
+  - Test 8: both PC2 clients connect; "Error synchronizing game settings": the server's
+    stats handler finds the client by SV_FindClientByAddr (822C1918), which compares IP
+    only (8228E4B0); statResponse unowned ("Dup statResponse"). General fix: each extra
+    local client is its own port (socket port + 100*client): NET_SendPacket (8228EBF0)
+    hook records the sock (= local client), kernel/net.cpp sendto sends from that port,
+    recvfrom also polls port+100*c and calls splitlive::ReceivedFor(c);
+    client_packet_sender's CL_PacketEvent refuses packets for another client
+    (PacketForAnother); server's FindClientByAddr hook prefers the exact port.
+    Rebuilt into both kits. (The challengeResponse tagging stays.)
+    Tabled by user: PC1's joining player 2 makes no join sound (leave sound plays; we use
+    AddLocalPlayer now; sound source not found yet); a PC that quits stays listed ~12 s
+    (party timeout) -- faster would be nicer; split-screen performance.
+  OPEN: user's two-PC test (again); leaving on PC2 is local only (host keeps him until PC2
   leaves); then release build + kits, final docs, commit, push.
 - Never propose one game copy per player: the user wants native split screen only.
 - Diagnostic Windows builds needed `pthread` linked on Windows (clock_gettime).

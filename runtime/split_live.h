@@ -30,4 +30,22 @@ namespace splitlive
 
     // Once a frame on the title's main thread.
     void Frame(PPCContext& ctx, uint8_t* base);
+
+    // A connectionless packet offered to `localClient` (its command tokenized)
+    // that is another local client's: a server's challengeResponse names the
+    // key the challenge was asked with, which several players of one machine
+    // ask for each their own.
+    bool ForAnotherClient(PPCContext& ctx, uint8_t* base, uint32_t localClient);
+
+    // Each local client beside the first is a port of its own to the network,
+    // its socket's plus kPortStep for each: a server tells the players of one
+    // machine apart by address. SendingClient is the local client the title
+    // sends for now (0: the first, or the machine itself); ReceivedFor says
+    // which one a datagram arrived for, by its port, and PacketForAnother
+    // whether a packet from the network (address type 4) offered to
+    // `localClient` is another's.
+    constexpr uint16_t kPortStep = 100;
+    uint32_t SendingClient();
+    void ReceivedFor(uint32_t localClient);
+    bool PacketForAnother(uint32_t localClient, uint32_t addressType);
 }
