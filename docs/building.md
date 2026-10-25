@@ -213,6 +213,7 @@ README's banner, tiles and headings into `docs/images/readme/`.
 | `update.cpp` | looks for a newer release and puts it in place of the running programs |
 | `report.cpp` | a bug report: a run with its log kept, the system's description, the new-issue page |
 | `settings.cpp` | what the player sets for the game, kept in `.env`, which the game reads as it starts |
+| `optimise.cpp` | OPTIMISE: the sharpest settings that keep a frame rate, found with the multiplayer's benchmark |
 | `sound.cpp` | the game's two menu sounds, read out of the installed `code_post_gfx.ff` at each start and played as the entries are moved through and chosen; none without an install |
 | `profile.cpp` | the profile screen's changes to the files under `saves/` ([saves.md](saves.md#what-the-launcher-changes)) |
 | `precompile.cpp` | every shader of the game compiled before it is played ([rendering.md](rendering.md#every-shader-compiled-before-play)) |
@@ -354,6 +355,35 @@ the host's clang-18. The executable needs nothing beside it:
   terminal it was started from, if any.
 
 It needs Windows 10 1803 or later, for the placeholder mapping of guest memory.
+
+### OPTIMISE
+
+The graphics screen starts with PLAYERS ON THIS PC (1 to 4), TARGET FPS (the
+screen's rate until another is chosen) and OPTIMISE, which finds the sharpest
+RESOLUTION and ANTIALIASING that keep the target with that many players
+(`launcher/optimise.cpp`, `mw2-launcher --optimise [<players>]` from a
+terminal). It runs the multiplayer's benchmark (`MW2_BENCHMARK`) at one
+setting after another, each a run of its own of about 40 seconds:
+
+- the settings, sharpest first: one resolution of the kept shape above the
+  screen's own with 4x antialiasing, the screen's own with 4x, 2x and none,
+  then each smaller resolution with 2x, the smallest with none;
+- the lightest runs first, and what it reaches is the most the computer
+  manages with that many players: the processor can hold the frame rate down
+  whatever is drawn. The sharpest runs next, and is taken if it reaches the
+  target with a tenth to spare, or a twentieth short of that most; else the
+  settings between are halved until the sharpest that does is found (a run
+  that misses by less than a twelfth is run once more, the better counting);
+- a resolution's shaders are compiled before its first run, into the cache of
+  its scale ([rendering.md](rendering.md#every-shader-compiled-before-play)).
+
+What it found is set on the screen (FPS LIMIT to the target) and kept in
+`.env` as `MW2_OPTIMISED_<players>`; choosing a number of players it has been
+run for puts those settings back. The settings are the game's when it starts,
+before anyone joins, so the number is the most who will play. The pane also
+shows the last line of `performance.txt`, the game's record of real play
+(`runtime/play_record.cpp`): a benchmark has nobody from other computers, and
+a match with more players, or hosting them, can run slower than it.
 
 ## A setup beside the disc
 

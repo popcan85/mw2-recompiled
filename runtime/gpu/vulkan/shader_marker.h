@@ -17,8 +17,8 @@
 
 namespace vk::shaders
 {
-    // Beside the cache, shaders/pipelines.bin (shader_build.h).
-    inline constexpr const char* kMarkerFile = "shaders/compiled.txt";
+    // Beside the cache (CacheFile, shader_build.h): compiled.txt.
+    const char* MarkerFile();
 
     // The files the pass reads its shaders from: the fastfiles in `game` and
     // the two executables, which carry a few of their own. The fastfiles are

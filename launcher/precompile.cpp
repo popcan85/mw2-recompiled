@@ -66,7 +66,7 @@ namespace
 }
 
 #ifndef MW2_HAVE_VULKAN
-precompile::Result precompile::Run(const std::string&, bool, Progress&)
+precompile::Result precompile::Run(const std::string&, bool, Progress&, uint32_t)
 {
     Result result;
     result.error = "this launcher was built without Vulkan";
@@ -84,7 +84,7 @@ namespace
     {
         std::string device, fingerprint;
     };
-    bool FindTarget(const std::string& asked, Target& target, std::string& error)
+    bool FindTarget(const std::string& asked, uint32_t scale, Target& target, std::string& error)
     {
         VkApplicationInfo app{ VK_STRUCTURE_TYPE_APPLICATION_INFO };
         app.pApplicationName = "mw2recomp";
@@ -107,7 +107,7 @@ namespace
         {
             target.device = vk::pipeline::DeviceId(physical);
             target.fingerprint = vk::shaders::Fingerprint(
-                physical, vk::shaders::Scale(static_cast<VkPhysicalDevice>(physical), AskedScale()), kGameFolder,
+                physical, vk::shaders::Scale(static_cast<VkPhysicalDevice>(physical), scale), kGameFolder,
                 AskedCustomMaps());
         }
         else if (error.empty()) error = "no graphics card here can draw the game";
@@ -116,11 +116,13 @@ namespace
     }
 }
 
-precompile::Result precompile::Run(const std::string& asked, bool always, Progress& progress)
+precompile::Result precompile::Run(const std::string& asked, bool always, Progress& progress, uint32_t forScale)
 {
     Result result;
     Target target;
-    if (!FindTarget(asked, target, result.error)) return result;
+    const uint32_t asking = forScale ? forScale : AskedScale();
+    vk::shaders::UseScale(asking);
+    if (!FindTarget(asked, asking, target, result.error)) return result;
     result.deviceId = target.device;
     if (vk::shaders::Compiled(target.fingerprint, &result.why) && !always)
     {
@@ -141,7 +143,7 @@ precompile::Result precompile::Run(const std::string& asked, bool always, Progre
     vk::shaders::RemoveMarker();
     std::error_code ec;
     if (!before.found || !vk::shaders::SameTarget(before.fingerprint, target.fingerprint))
-        fs::remove(vk::shaders::kCacheFile, ec);
+        fs::remove(vk::shaders::CacheFile(), ec);
 
     const unsigned cores = std::max(1u, std::thread::hardware_concurrency());
     auto cancelled = [&] {
@@ -224,8 +226,8 @@ precompile::Result precompile::Run(const std::string& asked, bool always, Progre
     progress.shaders = result.shaders;
 
     // ---- the device the game draws on, with its pipeline cache -------------
-    fs::create_directories(fs::path(vk::shaders::kCacheFile).parent_path(), ec);
-    vk::pipeline::SetCachePath(vk::shaders::kCacheFile);
+    fs::create_directories(fs::path(vk::shaders::CacheFile()).parent_path(), ec);
+    vk::pipeline::SetCachePath(vk::shaders::CacheFile());
     vk::pipeline::SetDevice(target.device);
     if (!vk::pipeline::Initialise())
     {
@@ -246,7 +248,7 @@ precompile::Result precompile::Run(const std::string& asked, bool always, Progre
     else
     {
         const VkFormat depth = vk::shaders::DepthFormat(physical);
-        const uint32_t scale = vk::shaders::Scale(physical, AskedScale());
+        const uint32_t scale = vk::shaders::Scale(physical, asking);
 
         // ---- each built as the game builds it, on every core ---------------
         const auto compileFrom = std::chrono::steady_clock::now();
@@ -282,10 +284,10 @@ precompile::Result precompile::Run(const std::string& asked, bool always, Progre
 
         vk::pipeline::Shutdown();   // writes the cache, if it got this far: what is compiled is kept
         if (cancelled()) return result;
-        result.cacheBytes = fs::file_size(vk::shaders::kCacheFile, ec);
+        result.cacheBytes = fs::file_size(vk::shaders::CacheFile(), ec);
         if (ec)
         {
-            result.error = "The compiled shaders could not be written to " + std::string(vk::shaders::kCacheFile) + ".";
+            result.error = "The compiled shaders could not be written to " + std::string(vk::shaders::CacheFile()) + ".";
             return result;
         }
     }

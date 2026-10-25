@@ -14,8 +14,13 @@
 namespace vk::shaders
 {
     // Where a player's copy keeps the pipeline cache the launcher fills,
-    // beside game/ and saves/.
-    inline constexpr const char* kCacheFile = "shaders/pipelines.bin";
+    // beside game/ and saves/: shaders/ for the console's scale, shaders/x2/
+    // and shaders/x3/ for the others, so that each MW2_SCALE a player
+    // switches between keeps its own and is compiled once. UseScale picks
+    // the folder by the scale asked for (MW2_SCALE), before anything is read
+    // or written there.
+    void UseScale(uint32_t asked);
+    const char* CacheFile();
 
     // What this build's shaders come out as: a SHA-256 CMake takes of the
     // sources that decide it -- the translator, this file, the pipeline

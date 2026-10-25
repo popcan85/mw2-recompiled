@@ -8,6 +8,7 @@
 //     mw2-launcher --upgrade                        a newer release, in a terminal
 //     mw2-launcher --compile-shaders                every shader of the game, in a terminal
 //     mw2-launcher --add-map <files>                a custom map (launcher/maps.h), in a terminal
+//     mw2-launcher --optimise [<players>]           OPTIMISE (launcher/optimise.h), in a terminal
 //     mw2-launcher --play campaign|multiplayer [--device <id>]
 //                                                   the window, which compiles the shaders
 //                                                   if they need it and starts that game
@@ -26,6 +27,7 @@
 #include "ui.h"
 #include "update.h"
 #include "maps.h"
+#include "optimise.h"
 #include "single.h"
 #include "../runtime/install/spawn.h"
 
@@ -78,7 +80,7 @@ namespace
     // from the PC game, or the shaders brought up to date.
     struct Job
     {
-        enum class Kind { Install, CheckUpdate, InstallUpdate, Compile, AddMap } kind = Kind::Install;
+        enum class Kind { Install, CheckUpdate, InstallUpdate, Compile, AddMap, Optimise } kind = Kind::Install;
         std::function<setup::Result(setup::Progress&, std::string&)> work;
         fs::path disc, update;
         setup::Progress progress;
@@ -246,6 +248,62 @@ namespace
         return 0;
     }
 
+    // OPTIMISE from a terminal: for `players` (0: PLAYERS ON THIS PC), aiming
+    // at TARGET FPS or the screen's rate, and the settings it finds kept as
+    // the graphics screen keeps them.
+    int OptimiseInTerminal(int players)
+    {
+        if (!SDL_Init(SDL_INIT_VIDEO))
+        {
+            std::fprintf(stderr, "The screen could not be looked at: %s\n", SDL_GetError());
+            return 1;
+        }
+        int height = 720, rate = settings::kConsoleFps;
+        if (const SDL_DisplayMode* mode = SDL_GetCurrentDisplayMode(SDL_GetPrimaryDisplay()))
+        {
+            height = int(std::lround(mode->h * (mode->pixel_density > 0 ? mode->pixel_density : 1.0f)));
+            rate = std::max(settings::kConsoleFps, int(std::lround(mode->refresh_rate)));
+        }
+        if (!players) players = settings::PlayersHere();
+        const int target = settings::TargetFps() ? settings::TargetFps() : rate;
+        const settings::Ratio ratio = settings::AspectRatio();
+        std::printf("optimising for %d players at %d frames a second, a screen %d pixels tall\n", players, target, height);
+        setup::Progress progress;
+        precompile::Progress compile;
+        optimise::Outcome outcome;
+        std::string error;
+        setup::Result result = setup::Result::Failed;
+        std::atomic<bool> done{ false };
+        std::thread pass([&] {
+            result = optimise::Find(players, target, ratio, height, progress, compile, outcome, error);
+            done = true;
+        });
+        std::string shown;
+        while (!done)
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+            std::lock_guard lock(progress.lock);
+            if (progress.title != shown) std::printf("%s\n", (shown = progress.title).c_str());
+        }
+        pass.join();
+        for (const optimise::Measured& run : outcome.runs)
+            std::printf("  %s: %s\n", optimise::Name(ratio, run.choice).c_str(),
+                        run.ok ? (std::to_string(int(run.fps)) + " fps, slowest 1% " + std::to_string(int(run.low1))).c_str()
+                               : run.error.c_str());
+        if (result != setup::Result::Done || !outcome.found)
+        {
+            std::fprintf(stderr, "OPTIMISE did not finish: %s\n", error.c_str());
+            return 1;
+        }
+        settings::SetResolution(outcome.ratio, outcome.choice.row);
+        settings::SetMsaa(outcome.choice.msaa);
+        if (outcome.target > 0) settings::SetFpsLimit(outcome.target);
+        settings::SetPlayersHere(players);
+        settings::SetOptimised(players, optimise::Encode(outcome));
+        std::printf("%s\n", optimise::Summary(outcome).c_str());
+        return 0;
+    }
+
     // The launcher an update starts is told so: the old one is still there
     // for a moment, and holds the window (single.h).
     constexpr const char* kTakeOver = "MW2_LAUNCHER_TAKES_OVER";
@@ -343,7 +401,7 @@ namespace
         Profile, Back, NextPlayer, Rename, PlayAs, Rank, Prestige, UnlockEverything, UnlockMissions, AllStars,
         CheckUpdate, InstallUpdate,
         // The graphics screen, and the next of what each of its entries sets.
-        Graphics, Fullscreen, AspectRatio, Resolution, Antialiasing, FpsLimit, Fov,
+        Graphics, PlayersHere, TargetFps, Optimise, Fullscreen, AspectRatio, Resolution, Antialiasing, FpsLimit, Fov,
         // The maps screen; CUSTOM MAPS turned on asks first, on a screen of its own.
         Maps, CustomMaps, CustomMapsOn, CustomMapsCancel, PcGame,
         // and its maps: one shown at a time, put in or out of the game, removed after a question.
@@ -431,11 +489,19 @@ namespace
         // the limit is the screen's.
         std::vector<int> fpsLimits{ settings::kConsoleFps, 120, 144, 0 };
         int screenFps = settings::kConsoleFps;
+        int screenWidth = 1280, screenHeight = 720;   // in pixels
+        optimise::Outcome optimised;                   // what the last OPTIMISE found
+        std::string lastRealPlay;                      // performance.txt's last line, read as the graphics screen opens
 
         void FindScreenRate()
         {
             if (const SDL_DisplayMode* mode = SDL_GetCurrentDisplayMode(SDL_GetDisplayForWindow(window)))
+            {
                 screenFps = std::max(settings::kConsoleFps, int(std::lround(mode->refresh_rate)));
+                const float density = mode->pixel_density > 0 ? mode->pixel_density : 1.0f;
+                screenWidth = int(std::lround(mode->w * density));
+                screenHeight = int(std::lround(mode->h * density));
+            }
             if (std::find(fpsLimits.begin(), fpsLimits.end(), screenFps) == fpsLimits.end())
             {
                 fpsLimits[std::abs(screenFps - fpsLimits[1]) <= std::abs(screenFps - fpsLimits[2]) ? 1 : 2] = screenFps;
@@ -626,6 +692,7 @@ namespace
                 reportScreen = action == Action::Report;
                 graphicsScreen = action == Action::Graphics;
                 mapsScreen = action == Action::Maps;
+                if (graphicsScreen) lastRealPlay = optimise::LastRealPlay();
                 mapsWarning = false;
                 mapRemoving = false;
                 mapIndex = 0;
@@ -729,6 +796,59 @@ namespace
                 const auto kept = std::find(fpsLimits.begin(), fpsLimits.end(), settings::FpsLimit());
                 const bool last = kept == fpsLimits.end() || kept + 1 == fpsLimits.end();
                 settings::SetFpsLimit(last ? fpsLimits.front() : kept[1]);
+                break;
+            }
+            case Action::PlayersHere:
+            {
+                // The next number, and what OPTIMISE found for it, if it did.
+                const int players = settings::PlayersHere() % 4 + 1;
+                settings::SetPlayersHere(players);
+                optimise::Outcome kept;
+                if (optimise::Decode(settings::Optimised(players), kept) && kept.ratio == settings::AspectRatio())
+                {
+                    settings::SetResolution(kept.ratio, kept.choice.row);
+                    settings::SetMsaa(kept.choice.msaa);
+                    if (kept.target > 0) settings::SetFpsLimit(kept.target);
+                    message = "Set up for " + std::to_string(players) + (players == 1 ? " player" : " players") + " as OPTIMISE found: " +
+                              optimise::Name(kept.ratio, kept.choice) + ", about " + std::to_string(int(kept.fps)) + " frames a second.";
+                }
+                else
+                    message = "OPTIMISE has not been run for " + std::to_string(players) + (players == 1 ? " player" : " players") +
+                              " yet: the settings below stay as they are.";
+                messageIsError = false;
+                messageFocus = focus;
+                break;
+            }
+            case Action::TargetFps:
+            {
+                // The rates FPS LIMIT goes through, without "none".
+                std::vector<int> rates(fpsLimits.begin(), fpsLimits.end() - 1);
+                const int now = settings::TargetFps() ? settings::TargetFps() : screenFps;
+                const auto kept = std::find(rates.begin(), rates.end(), now);
+                settings::SetTargetFps(kept == rates.end() || kept + 1 == rates.end() ? rates.front() : kept[1]);
+                break;
+            }
+            case Action::Optimise:
+            {
+                if (GameRunning())
+                {
+                    message = "The game is running. Close it first: OPTIMISE starts it on its own.";
+                    messageIsError = true;
+                    messageFocus = focus;
+                    break;
+                }
+                message.clear();
+                messageFocus = focus;
+                const int players = settings::PlayersHere();
+                const int target = settings::TargetFps() ? settings::TargetFps() : screenFps;
+                const settings::Ratio ratio = settings::AspectRatio();
+                const int height = screenHeight;
+                job = std::make_unique<Job>();
+                job->kind = Job::Kind::Optimise;
+                job->work = [this, j = job.get(), players, target, ratio, height](setup::Progress& progress, std::string& error) {
+                    return optimise::Find(players, target, ratio, height, progress, j->compile, optimised, error);
+                };
+                job->Start();
                 break;
             }
             case Action::Fov:
@@ -1022,6 +1142,38 @@ namespace
                 entries.push_back(std::move(entry));
                 return &entries.back();
             };
+            const int players = settings::PlayersHere();
+            const std::string who = std::to_string(players) + (players == 1 ? " player" : " players");
+            optimise::Outcome kept;
+            const bool known = optimise::Decode(settings::Optimised(players), kept);
+            add(Action::PlayersHere, "PLAYERS ON THIS PC " + std::to_string(players), "PLAYERS ON THIS PC",
+                "How many play split screen on this computer: now " + who + ". Choose to go to the next, 1 to 4."
+                "\n\nEvery player beside the first is a picture more to draw each frame, and the game's settings are "
+                "chosen as it starts, before anyone joins: set it to the most who will play this time. OPTIMISE finds "
+                "the settings for that many, and choosing a number it has been run for puts its settings back.\n\n" +
+                (known ? "For " + who + ": " + optimise::Name(kept.ratio, kept.choice) + ", about " + std::to_string(int(kept.fps)) +
+                             " frames a second."
+                       : "OPTIMISE has not been run for " + who + " yet."));
+            const int target = settings::TargetFps() ? settings::TargetFps() : screenFps;
+            add(Action::TargetFps, "TARGET " + std::to_string(target) + " FPS", "TARGET FPS",
+                "The frame rate OPTIMISE aims for: now " + std::to_string(target) + ". This screen is " +
+                std::to_string(screenWidth) + "x" + std::to_string(screenHeight) + " and shows " + std::to_string(screenFps) +
+                " pictures a second, so " + std::to_string(screenFps) +
+                " is the most it can show, and the smoothest. Choose to go to the next."
+                "\n\nOPTIMISE keeps this with a tenth to spare where the computer can. Where it can't whatever the settings, "
+                "it says so and keeps them sharp.");
+            const std::string& last = lastRealPlay;
+            add(Action::Optimise, "OPTIMISE", "OPTIMISE",
+                "Finds the sharpest RESOLUTION and ANTIALIASING that keep " + std::to_string(target) + " frames a second with " +
+                who + ", and sets them, with FPS LIMIT at " + std::to_string(target) + "."
+                "\n\nIt runs the multiplayer's benchmark a few times, about 40 seconds each, full screen, with nobody at "
+                "the controllers: the lightest settings first, to learn the most this computer manages, then sharper ones. "
+                "A resolution's shaders are compiled the first time it is tried. A few minutes in all." +
+                std::string(known ? "\n\nLast found for " + who + ": " + optimise::Name(kept.ratio, kept.choice) + ", about " +
+                                        std::to_string(int(kept.fps)) + " frames a second."
+                                  : "") +
+                (last.empty() ? std::string() : "\n\n" + last + " A benchmark has nobody from other computers; a match "
+                                                "with more players, or hosting them, can run slower than it."))->shown.ruleAbove = false;
             const bool fullscreen = settings::Fullscreen();
             add(Action::Fullscreen, std::string("FULLSCREEN ") + (fullscreen ? "ON" : "OFF"), "FULLSCREEN",
                 std::string("Whether the game starts fullscreen: now ") + (fullscreen ? "it does, at the screen's own resolution." : "it starts in a window.") +
@@ -1288,6 +1440,29 @@ namespace
                 }
             }
 
+            if (job && job->finished && job->kind == Job::Kind::Optimise)
+            {
+                job->thread.join();
+                const setup::Result result = job->result;
+                const std::string error = job->error;
+                job.reset();
+                messageIsError = result == setup::Result::Failed;
+                if (result == setup::Result::Done && optimised.found)
+                {
+                    settings::SetResolution(optimised.ratio, optimised.choice.row);
+                    settings::SetMsaa(optimised.choice.msaa);
+                    if (optimised.target > 0) settings::SetFpsLimit(optimised.target);
+                    settings::SetOptimised(optimised.players, optimise::Encode(optimised));
+                    message = optimise::Summary(optimised) + "\n\nRESOLUTION, ANTIALIASING and FPS LIMIT below are set to it.";
+                }
+                else if (result == setup::Result::Cancelled) message = "OPTIMISE was stopped. Nothing was changed.";
+                else message = "OPTIMISE could not finish: " + error;
+                lastRealPlay = optimise::LastRealPlay();
+                // Back on OPTIMISE, which the message is shown on.
+                focus = std::max(0, messageFocus);
+                focusPlaced = true;
+            }
+
             if (job && job->finished && job->kind == Job::Kind::AddMap)
             {
                 job->thread.join();
@@ -1384,6 +1559,7 @@ namespace
                     job->kind == Job::Kind::Install    ? "INSTALLING"
                     : job->kind == Job::Kind::Compile  ? "SHADERS"
                     : job->kind == Job::Kind::AddMap   ? "ADDING A MAP"
+                    : job->kind == Job::Kind::Optimise ? "OPTIMISING"
                                                        : "UPDATES",
                     "");
                 return entries;
@@ -1613,16 +1789,27 @@ namespace
                 frame.detail = progress.detail;
                 frame.amount = Amount(progress.done, progress.total);
                 frame.fraction = progress.total ? float(double(progress.done) / double(progress.total)) : -1.0f;
+                // OPTIMISE compiling a resolution's shaders.
+                if (app.job->kind == Job::Kind::Optimise && progress.title.rfind("Compiling", 0) == 0 && app.job->compile.shaders)
+                {
+                    const uint32_t shaders = app.job->compile.shaders, compiled = app.job->compile.compiled;
+                    frame.amount = std::to_string(compiled) + " of " + std::to_string(shaders);
+                    frame.fraction = float(compiled) / float(shaders);
+                }
                 frame.text = progress.cancel                            ? "Stopping..."
                              : app.job->kind == Job::Kind::CheckUpdate ? "Looking for a newer version..."
                              : app.job->kind == Job::Kind::InstallUpdate ? "The launcher starts again when it is done."
+                             : app.job->kind == Job::Kind::Optimise
+                                 ? "Each benchmark starts the multiplayer on its own, plays a moment of split screen with "
+                                   "nobody at the controllers, counts its frames and ends. Leave the controllers be meanwhile. "
+                                   "CANCEL stops it and changes nothing."
                              : app.job->kind == Job::Kind::AddMap
                                  ? "The map was made for the PC game: it is converted for the Xbox 360, with what it needs "
                                    "from the game's own files. It takes a minute or so."
                                  : "Stopping and starting again later carries on where it left off.";
             }
             else if (app.reportScreen ? !app.message.empty() && !app.recording && (app.messageFocus < 0 || app.focus == app.messageFocus)
-                     : app.profileScreen || app.mapsScreen ? !app.message.empty() && (app.messageFocus < 0 || app.focus == app.messageFocus)
+                     : app.profileScreen || app.mapsScreen || app.graphicsScreen ? !app.message.empty() && (app.messageFocus < 0 || app.focus == app.messageFocus)
                                        : !app.message.empty() && (current.action == Action::Install || current.action == Action::ChooseUpdate ||
                                                                   current.action == Action::CheckUpdate || current.action == Action::InstallUpdate || app.messageIsError))
             {
@@ -1779,6 +1966,8 @@ int main(int argc, char** argv)
     fs::path disc, update;
     const bool upgrade = arguments.size() == 1 && arguments[0] == "--upgrade";
     const bool compile = arguments.size() == 1 && arguments[0] == "--compile-shaders";
+    const bool optimising = !arguments.empty() && arguments.size() <= 2 && arguments[0] == "--optimise";
+    const int optimiseFor = optimising && arguments.size() == 2 ? std::clamp(std::atoi(Utf8(arguments[1]).c_str()), 1, 4) : 0;
     const bool addMap = arguments.size() >= 2 && arguments[0] == "--add-map";
     std::vector<fs::path> mapFiles;
     if (addMap)
@@ -1792,8 +1981,8 @@ int main(int argc, char** argv)
         if (arguments.size() == 4 && arguments[2] == "--device") device = Utf8(arguments[3]);
         else if (arguments.size() != 2) play = Action::None;
     }
-    bool usage = !arguments.empty() && arguments[0] != "--install" && !upgrade && !compile && !addMap && play == Action::None;
-    for (size_t i = 1; i < arguments.size() && !usage && play == Action::None && !addMap; i++)
+    bool usage = !arguments.empty() && arguments[0] != "--install" && !upgrade && !compile && !addMap && !optimising && play == Action::None;
+    for (size_t i = 1; i < arguments.size() && !usage && play == Action::None && !addMap && !optimising; i++)
     {
         const std::string text = Utf8(arguments[i]);
         if (text == "--update" && i + 1 < arguments.size()) update = fs::absolute(arguments[++i], ec);
@@ -1813,12 +2002,14 @@ int main(int argc, char** argv)
             std::fprintf(stderr, "usage: %s --install [<disc image or extracted disc folder>] [--update <package or folder>]\n"
                                  "       %s --upgrade\n"
                                  "       %s --compile-shaders\n"
+                                 "       %s --optimise [<players>]\n"
                                  "       %s --add-map <one of a map's files>...\n"
-                                 "       %s --play campaign|multiplayer [--device <id>]\n", argv[0], argv[0], argv[0], argv[0], argv[0]);
+                                 "       %s --play campaign|multiplayer [--device <id>]\n", argv[0], argv[0], argv[0], argv[0], argv[0], argv[0]);
             return 2;
         }
         if (upgrade) return UpgradeInTerminal();
         if (compile) return CompileInTerminal();
+        if (optimising) return OptimiseInTerminal(optimiseFor);
         if (addMap) return AddMapInTerminal(mapFiles);
         return InstallInTerminal(disc, update);
     }

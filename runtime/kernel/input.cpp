@@ -12,6 +12,7 @@
 #include "../split_live.h"
 #include "../unlock_all.h"
 #include "../benchmark.h"
+#include "../play_record.h"
 #include "../stutters.h"
 #include "../gpu/vulkan/renderer.h"
 
@@ -319,6 +320,7 @@ PPC_FUNC(__imp__XamInputGetState)
     splitlive::Frame(ctx, base);
     unlockall::Frame(ctx, base);
     benchmark::Frame(ctx, base);
+    playrecord::Frame(ctx, base);
 
     uint32_t user  = ctx.r3.u32;
     uint32_t sAddr = ctx.r5.u32;

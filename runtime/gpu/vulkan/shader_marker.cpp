@@ -117,10 +117,26 @@ std::string vk::shaders::Fingerprint(void* physical, uint32_t scale, const fs::p
     return text;
 }
 
+namespace
+{
+    std::string g_folder = "shaders";
+    std::string g_cacheFile = "shaders/pipelines.bin", g_markerFile = "shaders/compiled.txt";
+}
+
+void vk::shaders::UseScale(uint32_t asked)
+{
+    g_folder = asked > 1 ? "shaders/x" + std::to_string(asked) : "shaders";
+    g_cacheFile = g_folder + "/pipelines.bin";
+    g_markerFile = g_folder + "/compiled.txt";
+}
+
+const char* vk::shaders::CacheFile() { return g_cacheFile.c_str(); }
+const char* vk::shaders::MarkerFile() { return g_markerFile.c_str(); }
+
 vk::shaders::Marker vk::shaders::ReadMarker()
 {
     Marker marker;
-    std::ifstream in(kMarkerFile, std::ios::binary);
+    std::ifstream in(MarkerFile(), std::ios::binary);
     if (!in) return marker;
     std::string line;
     while (std::getline(in, line))
@@ -147,7 +163,7 @@ bool vk::shaders::Compiled(const std::string& fingerprint, std::string* why)
     const Marker marker = ReadMarker();
     if (!marker.found) return say("The game's shaders have not been compiled for this computer yet.");
     // A device that compiles shaders only with a draw's state had none compiled.
-    if (marker.shaders && (fs::file_size(kCacheFile, ec) == 0 || ec)) return say("The compiled shaders are missing.");
+    if (marker.shaders && (fs::file_size(CacheFile(), ec) == 0 || ec)) return say("The compiled shaders are missing.");
     if (marker.fingerprint == fingerprint) return true;
     // The first fact that differs.
     const std::vector<std::string> was = Lines(marker.fingerprint), is = Lines(fingerprint);
@@ -167,7 +183,7 @@ bool vk::shaders::Compiled(const std::string& fingerprint, std::string* why)
 
 bool vk::shaders::WriteMarker(const std::string& fingerprint, uint32_t shaders, std::string& error)
 {
-    const std::string partial = std::string(kMarkerFile) + ".partial";
+    const std::string partial = std::string(MarkerFile()) + ".partial";
     {
         std::ofstream out(partial, std::ios::binary | std::ios::trunc);
         out << fingerprint << "shaders " << shaders << "\n";
@@ -175,7 +191,7 @@ bool vk::shaders::WriteMarker(const std::string& fingerprint, uint32_t shaders, 
         if (!out) { error = "the list of compiled shaders could not be written"; return false; }
     }
     std::error_code ec;
-    fs::rename(partial, kMarkerFile, ec);
+    fs::rename(partial, MarkerFile(), ec);
     if (ec) { error = "the list of compiled shaders could not be put in place: " + ec.message(); return false; }
     return true;
 }
@@ -183,7 +199,7 @@ bool vk::shaders::WriteMarker(const std::string& fingerprint, uint32_t shaders, 
 void vk::shaders::RemoveMarker()
 {
     std::error_code ec;
-    fs::remove(kMarkerFile, ec);
+    fs::remove(MarkerFile(), ec);
 }
 
 bool vk::shaders::SameTarget(const std::string& a, const std::string& b)

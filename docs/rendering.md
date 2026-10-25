@@ -524,7 +524,9 @@ pipeline cache it starts with, `shaders/pipelines.bin`. The launcher fills it
   - each fastfile's and executable's name, size and time.
 
   A change to any of these means the cache no longer holds what the game will
-  build.
+  build. Each scale keeps its cache and marker apart -- `shaders/` for 1,
+  `shaders/x2/` and `shaders/x3/` for the others (`vk::shaders::UseScale`) --
+  so that switching between resolutions compiles each once.
 - **The gates.** The launcher checks the marker before PLAY and REPORT A BUG,
   and runs the pass again first when it no longer fits; it also runs the pass
   after an install. The game checks the marker on a player start, once the

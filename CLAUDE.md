@@ -258,8 +258,25 @@ system-link split-screen; report approach, risks, odds.
     Per-view scene is 512x300 of 640x360 in 4p (the title's usual 80%, as 1024x600/1280x720).
   - A change of MW2_SCALE makes the game hand over to the launcher to recompile all
     shaders (~1-2 min; marker shaders/compiled.txt records the scale; MSAA does not
-    matter). Optimiser should keep a cache per scale. bench-test shares
-    stage0-stock\shaders (now scale 1, which the kits use).
+    matter). Optimiser should keep a cache per scale.
+  - OPTIMISE BUILT (user away; tested here only via the terminal):
+    * per-scale shader caches: vk::shaders::UseScale -> shaders/ (1), shaders/x2/,
+      shaders/x3/; precompile::Run(..., scale). Shader build id changed -> every
+      install recompiles once.
+    * runtime/play_record.cpp: one line per real match (>=20 s) in performance.txt
+      (map, hosting, local, players when hosting, settings, fps, low1).
+    * launcher/optimise.cpp + graphics screen: PLAYERS ON THIS PC (MW2_PLAYERS_HERE;
+      switching puts back MW2_OPTIMISED_<n>), TARGET FPS (MW2_TARGET_FPS, default the
+      screen's rate), OPTIMISE (job, CANCEL, compile progress, result message, last
+      real match in the pane). `mw2-launcher --optimise [players]` in a terminal.
+      Ladder: screen+1 4x, screen 4x/2x/0, lower rows; lightest first, then sharpest,
+      then halving; goal min(target*1.1, lightest*0.95); a miss <8% retried once.
+    * Terminal run here (4p, 1440p screen, 240 target): 720p/0x 187, 4K/4x 160 (no),
+      1440p/2x 181, 1440p/4x 183 -> chose 1440p 4x, ~6 min incl. 3 compiles.
+      Release build benchmark: 165 once (warm-up outlier), then 185 / 183.
+    * builds\bench-test has its OWN shaders folder now (not stage0-stock's).
+    * Installer repacked; setup-test updated in place (new launcher/exes).
+    NOT yet seen by the user: the graphics screen entries, the in-window job/progress.
   Parked: split-screen performance (title lowers resolution/fidelity in split screen;
   GPU ~53%, ~130 fps); 3+ PCs untested (non-host PCs' extras seen by each other);
   merging upstream acd414a.

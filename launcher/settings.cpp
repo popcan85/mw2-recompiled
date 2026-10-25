@@ -194,6 +194,42 @@ void settings::SetCustomMaps(bool on)
     Save();
 }
 
+int settings::PlayersHere()
+{
+    const auto kept = g_kept.find("MW2_PLAYERS_HERE");
+    return kept == g_kept.end() ? 1 : std::clamp(std::atoi(kept->second.c_str()), 1, 4);
+}
+
+void settings::SetPlayersHere(int players)
+{
+    g_kept["MW2_PLAYERS_HERE"] = std::to_string(std::clamp(players, 1, 4));
+    Save();
+}
+
+int settings::TargetFps()
+{
+    const auto kept = g_kept.find("MW2_TARGET_FPS");
+    return kept == g_kept.end() ? 0 : std::clamp(std::atoi(kept->second.c_str()), 0, 1000);
+}
+
+void settings::SetTargetFps(int fps)
+{
+    g_kept["MW2_TARGET_FPS"] = std::to_string(fps);
+    Save();
+}
+
+std::string settings::Optimised(int players)
+{
+    const auto kept = g_kept.find("MW2_OPTIMISED_" + std::to_string(players));
+    return kept == g_kept.end() ? std::string() : kept->second;
+}
+
+void settings::SetOptimised(int players, const std::string& found)
+{
+    g_kept["MW2_OPTIMISED_" + std::to_string(players)] = found;
+    Save();
+}
+
 bool settings::Sounds()
 {
     const auto kept = g_kept.find("MW2_LAUNCHER_SOUNDS");

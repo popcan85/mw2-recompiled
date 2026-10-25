@@ -19,6 +19,11 @@ pictures and sounds ADD MAP gives a converted map (MAPS → PC GAME chooses it).
 the launcher looks for Steam's copy once a run and writes the line when it finds one; an empty
 `MW2_PC_GAME=` says there is none. The environment's value decides over the file's
 ([maps.md](maps.md#inputs)).
+OPTIMISE keeps its own lines there, which the game does not read: `MW2_PLAYERS_HERE` (PLAYERS ON THIS PC),
+`MW2_TARGET_FPS` (TARGET FPS) and `MW2_OPTIMISED_<players>`, what it found for that many
+([building.md](building.md#optimise)). The multiplayer adds a line to `performance.txt` beside the
+executables for every match of 20 seconds or more: the map, whether it hosted, its players and everyone's,
+the settings, the average frame rate and the slowest hundredth's (`runtime/play_record.cpp`).
 `MW2_INSTALL_DISC=<disc image>` makes the launcher, opened with no game installed, install from
 that image at once, as if it were chosen with INSTALL GAME; `mw2-setup` writes it, naming the image
 beside it ([building.md](building.md#a-setup-beside-the-disc)).

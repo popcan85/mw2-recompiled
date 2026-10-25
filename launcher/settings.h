@@ -84,6 +84,17 @@ namespace settings
     bool CustomMaps();
     void SetCustomMaps(bool on);
 
+    // OPTIMISE's own (launcher/optimise.h), which the game does not read:
+    // MW2_PLAYERS_HERE, the players this computer is set up for (1 to 4, 1
+    // when unset); MW2_TARGET_FPS, the frame rate it aims for (0 until one is
+    // chosen); MW2_OPTIMISED_<players>, what it found for that many.
+    int PlayersHere();
+    void SetPlayersHere(int players);
+    int TargetFps();
+    void SetTargetFps(int fps);
+    std::string Optimised(int players);
+    void SetOptimised(int players, const std::string& found);
+
     // MW2_LAUNCHER_SOUNDS: 0 keeps the launcher's menus silent. Written by hand.
     bool Sounds();
 

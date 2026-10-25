@@ -54,6 +54,8 @@ namespace precompile
     // every core. `device` (vk::pipeline::DeviceId) is the one the game
     // draws on when it named one; else the one the marker names, if the
     // machine still has it; else the one the game's window would pick.
+    // `scale` is the MW2_SCALE to compile for, 0 for the one the game would
+    // take; each scale keeps a cache of its own (vk::shaders::CacheFile).
     // Blocks until done. Run from the folder the launcher is in.
-    Result Run(const std::string& device, bool always, Progress& progress);
+    Result Run(const std::string& device, bool always, Progress& progress, uint32_t scale = 0);
 }

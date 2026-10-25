@@ -17,6 +17,7 @@
 #include "crash.h"
 #include "online/service.h"
 #include "split_live.h"
+#include "play_record.h"
 #include "engine.h"
 #include "pacing_trace.h"
 #include "player.h"
@@ -67,6 +68,7 @@ void crash::RequestExit(const char* why)
         LOGI("--------------------------------------------------");
         LOGI("exiting: %s", why);
         splitlive::Goodbye();
+        playrecord::End();
         stutters::Ending();
         gpu::Shutdown();
         ReportAll();
@@ -210,7 +212,8 @@ int main(int argc, char** argv)
         // The launcher compiles every shader of the game into this cache
         // before the game first runs (launcher/precompile.cpp), and the game
         // draws only with that done for the device it draws on.
-        vk::pipeline::SetCachePath(vk::shaders::kCacheFile);
+        vk::shaders::UseScale(uint32_t(env::Number("MW2_SCALE", 1)));
+        vk::pipeline::SetCachePath(vk::shaders::CacheFile());
         vk::renderer::CheckCompiledShaders(launch.gameRoot.string());
     }
     else
