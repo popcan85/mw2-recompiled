@@ -307,10 +307,24 @@ of this machine in an Xbox LIVE party and match through it:
   session has him as a member; any other session the first player is
   registered in (`Session_RegisterUser`) gets the other active local players
   registered beside him, in free slots.
+- Joining another machine's game, the party's "go" calls
+  `CL_ConnectFromParty` for each active local client, and each call
+  disconnects them all; the first call starts every active client connecting,
+  and the calls after it are passed over.
+- A server tells clients apart by address, and the players of one machine
+  share its IP. Each local client beside the first sends from a port of its
+  own, the socket's plus 100 for each (`NET_SendPacket` names the client, the
+  socket underneath picks the port), and what arrives at that port is offered
+  to that client alone; the server's `SV_FindClientByAddr`, which compares IPs
+  only, prefers the client at the exact port. The server also adds the key a
+  `getchallenge` came with to its `challengeResponse`, so that each client
+  takes its own challenge.
 
-Two players on one machine then play a private match it hosts, in the
-title's own split screen, and a machine that joins the lobby can bring a
-second player the same way. The log names who is at each controller, the
+Up to four players of each machine then play one private match, in the
+title's own split screen on each: tried with two machines, four players on
+the host and two on the other. Three or more machines have not been tried,
+and split screen draws at the lower resolution and detail the title uses for
+it offline. The log names who is at each controller, the
 controllers' routing, the active clients and their connection states as they
 change, each registration, and every session message with its words
 (`XSessionJoinRemote` lists the XUIDs it adds).

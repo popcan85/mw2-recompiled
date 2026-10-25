@@ -209,8 +209,13 @@ system-link split-screen; report approach, risks, odds.
      Parsec); expected ~50-100 ms from snapshots + interpolation, net code adds no waits.
   6. connectResponse: covered by per-client ports (server replies to the sender's
      port; ReceivedFor/PacketForAnother) -- nothing to do unless a test says so.
-  7. Then: release build + kits for both PCs, final docs, push the branch to origin
-     (after the user confirms this batch).
+  7. DONE 2026-10-24: release build; kits PC1 `builds\stage2-release\launch.bat`
+     (junctions to stage0-stock), PC2 files staged in `builds\stage2-pc2-files\`
+     (mw2-mp-stage2.exe + launch-stage2.bat, for pc2-kit; PC2 was offline -- copy
+     them over if not done yet). Docs: per-client ports, challenge key, ConnectFromParty,
+     tested scope and limits. Branch pushed to origin.
+  STAGE 2 DONE (user confirmed 4+2 players across two PCs, polish confirmed).
+  NEXT: stage 3 (investigate only, see Stages), or the parked items.
   Parked: split-screen performance (title lowers resolution/fidelity in split screen;
   GPU ~53%, ~130 fps); 3+ PCs untested (non-host PCs' extras seen by each other);
   merging upstream acd414a.
