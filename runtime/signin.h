@@ -22,7 +22,8 @@
 // this one signs in local profiles, which XAM puts on Live only with
 // MW2_SPLIT_LIVE (kernel/xam.cpp). Nothing is
 // remembered between runs: every controller but the first starts signed
-// out, and the first's is not chosen on this screen.
+// out. The first's player is not chosen on this screen: the Guide button at
+// the first controller opens it with his profile alone, to name it again.
 //
 // The screen is drawn here into a picture the presenter lays over the frame,
 // and is driven by the controller that asked for it, through the title's own
@@ -50,8 +51,8 @@ namespace signin
 
     // The title asks for the screen: it opens for the controller pressed last.
     void Ask();
-    // The screen for this controller (the second to the fourth), and whether
-    // it is open.
+    // The screen for this controller, and whether it is open. For the first
+    // it only names his profile again.
     void AskFor(uint32_t user);
     bool Open();
     // Signs the player at controller 1, 2 or 3 out, as choosing "Sign out" does.

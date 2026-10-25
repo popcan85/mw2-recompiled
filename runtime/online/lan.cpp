@@ -378,6 +378,7 @@ namespace
             const char* login = name ? name : UserName();
             former_ = Fnv(login ? login : "Player");
             name_ = name ? name : player.name;
+            named_ = name != nullptr;
             if (const char* join = env::Text("MW2_LAN_JOIN")) join_ = join;
             accept_ = env::Flag("MW2_LAN_ACCEPT");
             char text[INET_ADDRSTRLEN];
@@ -392,7 +393,9 @@ namespace
         // takes the first slot, so a second copy is a second player.
         uint64_t Account() override { return account_ + slot_; }
         uint64_t FormerAccount() override { return former_ + slot_; }
-        std::string LocalName() override { return name_; }
+        // MW2_NAME's, or the first controller's profile's as it is now: the
+        // sign-in screen can name it again.
+        std::string LocalName() override { return named_ ? name_ : signin::First().name; }
 
         bool Send(uint64_t peer, uint16_t fromPort, uint16_t toPort,
                   const void* bytes, size_t size) override
@@ -485,7 +488,7 @@ namespace
             presence.kind = kind;
             presence.joinable = hasJoinable_;
             presence.account = BigEndian64(Account());
-            std::snprintf(presence.name, sizeof presence.name, "%s", name_.c_str());
+            std::snprintf(presence.name, sizeof presence.name, "%s", LocalName().c_str());
             if (hasJoinable_) std::memcpy(presence.session, joinable_.session, sizeof presence.session);
             return presence;
         }
@@ -579,6 +582,7 @@ namespace
         uint32_t instance_ = 0;
         uint32_t slot_ = 0;
         std::string name_;
+        bool named_ = false;   // by MW2_NAME
         uint64_t account_ = 0, former_ = 0;
         bool warned_ = false;                  // told once that another machine has this identity
         std::mutex lock_;

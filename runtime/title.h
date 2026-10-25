@@ -413,6 +413,9 @@
 #define T_SV_CLIENT_ADDRESS       40u
 #define T_Live_XuidIsLocal        823380C0
 #define T_Live_ProfileName        82337B00
+// What Live_ProfileName returns: the title's copy of each controller's
+// gamertag, read from XAM at sign-in, 104 bytes a controller.
+#define T_DATA_ProfileNames       0x83914504u
 #define T_Live_Xuid               8233B648
 #define T_Party_ClanTag           82194500
 // The rest of a member PartyHost_AddLocalPlayer fills from the controller's

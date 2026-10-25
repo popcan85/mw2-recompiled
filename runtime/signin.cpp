@@ -1,6 +1,8 @@
 // The sign-in screen and who it signed in (signin.h).
 #include "signin.h"
 #include "diagnostics.h"
+#include "guest.h"
+#include "title.h"
 #include "log.h"
 #include "kernel/kernel.h"
 #include "env.h"
@@ -235,6 +237,19 @@ namespace
         return made;
     }
 
+    // The title's copy of a controller's gamertag, taken at sign-in, named
+    // again: only while it still holds the old name.
+    void RenameInTitle(uint32_t user, const std::string& was, const std::string& name)
+    {
+#ifdef T_DATA_ProfileNames
+        char* copy = GuestPtr<char>(T_DATA_ProfileNames + 104 * user);
+        if (std::strncmp(copy, was.c_str(), 16) != 0) return;
+        std::snprintf(copy, 16, "%s", name.c_str());
+#else
+        (void)user; (void)was; (void)name;
+#endif
+    }
+
     // A profile named again in the file, and for whoever plays as it.
     void RenameLocked(uint64_t id, const std::string& name)
     {
@@ -242,9 +257,17 @@ namespace
         for (Profile& profile : book.profiles)
             if (profile.id == id) profile.name = name;
         Write(book);
-        for (Player& player : g_players)
-            if (player.signedIn && player.id == id) player.name = name;
-        if (g_first.id == id) g_first.name = name;
+        for (uint32_t user = 1; user < kUsers; user++)
+            if (Player& player = g_players[user]; player.signedIn && player.id == id)
+            {
+                RenameInTitle(user, player.name, name);
+                player.name = name;
+            }
+        if (g_first.signedIn && g_first.id == id)
+        {
+            RenameInTitle(0, g_first.name, name);
+            g_first.name = name;
+        }
     }
 
     uint32_t MaskLocked()
@@ -368,21 +391,28 @@ namespace
 
     void OpenLocked(uint32_t user)
     {
-        // The first controller's player is the online service's.
-        if (g_open || user == 0 || user >= kUsers) return;
+        if (g_open || user >= kUsers) return;
         g_asking = user;
-        const Player& current = g_players[g_asking];
-
         g_items.clear();
-        for (const Profile& profile : Profiles())
+        if (user == 0)
         {
-            const bool taken = profile.id == FirstLocked().id ||
-                               std::any_of(g_players, g_players + kUsers, [&](const Player& other) {
-                                   return other.signedIn && other.id == profile.id; });
-            if (!taken) g_items.push_back({ Item::Existing, profile, profile.name });
+            // The first controller's player is the online service's: his
+            // profile is only named again here.
+            const Player& first = FirstLocked();
+            g_items.push_back({ Item::Existing, { first.id, first.name }, first.name });
         }
-        g_items.push_back({ Item::New, {}, "New profile" });
-        if (current.signedIn) g_items.push_back({ Item::SignOut, {}, "Sign out" });
+        else
+        {
+            for (const Profile& profile : Profiles())
+            {
+                const bool taken = profile.id == FirstLocked().id ||
+                                   std::any_of(g_players, g_players + kUsers, [&](const Player& other) {
+                                       return other.signedIn && other.id == profile.id; });
+                if (!taken) g_items.push_back({ Item::Existing, profile, profile.name });
+            }
+            g_items.push_back({ Item::New, {}, "New profile" });
+            if (g_players[g_asking].signedIn) g_items.push_back({ Item::SignOut, {}, "Sign out" });
+        }
         g_focus = 0;
         g_naming = {};
         g_open = true;
@@ -453,7 +483,7 @@ bool signin::Input(uint32_t user, uint16_t buttons)
         if (pressed & kUp)   { g_focus = (g_focus + count - 1) % count; g_version++; }
         if (pressed & kA)
         {
-            if (focused.what == Item::New) StartNaming(focused);
+            if (focused.what == Item::New || g_asking == 0) StartNaming(focused);
             else ChooseLocked(Item(focused));
         }
         else if ((pressed & kX) && focused.what == Item::Existing) StartNaming(focused);
@@ -567,7 +597,7 @@ bool signin::Picture(uint32_t windowHeight, Image& image)
     Fill(image, 0, 0, int(width), int(height), kEdge);
     Fill(image, at(2), at(2), int(width) - at(2), int(height) - at(2), kBack);
     Text(image, g_heading, float(at(28)), float(at(20)), kWhite, "SIGN IN");
-    const Player& current = g_players[g_asking];
+    const Player& current = g_asking == 0 ? g_first : g_players[g_asking];
     const std::string who = "Controller " + std::to_string(g_asking + 1) +
         (current.signedIn ? ", signed in as " + current.name : "");
     Text(image, g_small, float(at(29)), float(at(64)), kDim, who);
@@ -623,8 +653,8 @@ bool signin::Picture(uint32_t windowHeight, Image& image)
     if (first > 0) Text(image, g_small, float(width) - float(at(40)), float(at(84)), kDim, "...");
     if (first + kSeen < count) Text(image, g_small, float(width) - float(at(40)), float(at(318)), kDim, "...");
     float x = Text(image, g_small, float(at(28)), float(at(326)), kAmber, "A");
-    x = Text(image, g_small, x, float(at(326)), kDim, "  Select     ");
-    if (g_items[g_focus].what == Item::Existing)
+    x = Text(image, g_small, x, float(at(326)), kDim, g_asking == 0 ? "  Rename     " : "  Select     ");
+    if (g_items[g_focus].what == Item::Existing && g_asking != 0)
     {
         x = Text(image, g_small, x, float(at(326)), kAmber, "X");
         x = Text(image, g_small, x, float(at(326)), kDim, "  Rename     ");

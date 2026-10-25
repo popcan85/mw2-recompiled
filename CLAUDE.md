@@ -227,6 +227,23 @@ system-link split-screen; report approach, risks, odds.
   Package: `builds\installer\MW2 Setup.exe` (+ READ ME.txt, settings in
   builds\installer-files\settings.env). Test folder `builds\setup-test\` (setup +
   hard link to the ISO). User CONFIRMED it installs and runs (brief test, 2026-10-25).
+- 2026-10-25 session (user asked for: merge upstream, performance/auto graphics, player 1
+  rename):
+  - Merged upstream acd414a (4:3, Flatpak Steam): clean.
+  - Player 1 rename: Guide at controller 1 opens the sign-in screen with player 1's
+    profile alone (A/X rename). RenameLocked also rewrites the title's cached gamertag
+    (T_DATA_ProfileNames 0x83914504, 104 a controller, Live_ProfileName's) when it still
+    holds the old name; lan's LocalName reads signin::First() live (unless MW2_NAME).
+    Installer repacked (builds\installer, copy in setup-test). NOT yet tested.
+  - Performance facts: the title draws one frame (<=1280x800 of its pixels), scaled by
+    an integer MW2_SCALE (2 = 1440p, 3 = 4K); MSAA via MW2_MSAA; FPS via MW2_FPS_LIMIT.
+    Texture quality is fixed (console files). The last 4+2 session ran ~190-225 fps at
+    a 240 cap with NO MW2_SCALE (720p stretched to 1440p) -- the blur the user saw.
+    Ring consumer 51% busy. Per-view scene size in split screen not yet measured.
+    Proposed AUTO graphics (awaiting the user's go-ahead): launcher picks shape/scale/
+    MSAA/FPS from display + GPU; the game records in-play fps per player count; the
+    launcher steps settings down/up next start. First step: user measures fps at
+    RESOLUTION 2560x1440 (+ANTIALIASING 4X) with 4 players.
   Parked: split-screen performance (title lowers resolution/fidelity in split screen;
   GPU ~53%, ~130 fps); 3+ PCs untested (non-host PCs' extras seen by each other);
   merging upstream acd414a.
