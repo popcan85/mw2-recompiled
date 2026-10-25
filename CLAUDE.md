@@ -226,7 +226,7 @@ system-link split-screen; report approach, risks, odds.
   build is `build-win-release/` (first SP build here, REGENERATE=1).
   Package: `builds\installer\MW2 Setup.exe` (+ READ ME.txt, settings in
   builds\installer-files\settings.env). Test folder `builds\setup-test\` (setup +
-  hard link to the ISO). NOT yet tested by the user; not pushed.
+  hard link to the ISO). User CONFIRMED it installs and runs (brief test, 2026-10-25).
   Parked: split-screen performance (title lowers resolution/fidelity in split screen;
   GPU ~53%, ~130 fps); 3+ PCs untested (non-host PCs' extras seen by each other);
   merging upstream acd414a.
