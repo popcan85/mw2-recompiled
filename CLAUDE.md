@@ -204,8 +204,9 @@ system-link split-screen; report approach, risks, odds.
      compared session addresses, but the extra is added at his memberJoin's sender
      address (10.0.0.1:1000), never his first's, so the new rule removed him and PC2
      resent memberJoin. Now g_beside maps each extra's XUID to his first's (recorded
-     in HandleMemberJoin) and FirstAt looks the first up by XUID. In both kits,
-     NOT yet tested.
+     in HandleMemberJoin) and FirstAt looks the first up by XUID. User CONFIRMED
+     (2026-10-24): whole polish batch good. Noted: PC2 felt slightly laggy (viewed via
+     Parsec); expected ~50-100 ms from snapshots + interpolation, net code adds no waits.
   6. connectResponse: covered by per-client ports (server replies to the sender's
      port; ReceivedFor/PacketForAnother) -- nothing to do unless a test says so.
   7. Then: release build + kits for both PCs, final docs, push the branch to origin
