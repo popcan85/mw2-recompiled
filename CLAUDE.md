@@ -188,7 +188,8 @@ system-link split-screen; report approach, risks, odds.
   launchers swap in a `*-new.exe` placed beside a running exe):
   1. Reconnect fix CONFIRMED. Glyphs fixed (822EE7F0 was Menu_IsVisible; hook now on
      the real Menu_Paint 822F1E80) -- user CONFIRMED (fa5249c).
-  Polish batch (one commit, both kits, NOT yet tested):
+  Polish batch 4dd9348: user CONFIRMED join sound (2), icons on both PCs (3), closing
+  PC2 drops its players at once (5). Manual leave on PC2 (4) not yet re-checked.
   2. Join sound: Join plays mp_player_join (8219C370(0)) when a party taking members
      and active added him (AddLocalPlayer does not; RemoveMember plays the leave one).
   3. Controller icons on a joining PC: no change -- PC2's log shows party1 active
@@ -199,6 +200,12 @@ system-link split-screen; report approach, risks, odds.
   5. Quitting PC: TimeoutMembers hook removes a beside member whose first is gone;
      crash::RequestExit calls splitlive::Goodbye (waits <=300 ms for a frame that
      sends each extra's dis, then plain dis). The 12 s timeout is hard-coded (12000).
+     BUG found in test: PC2's 2nd player left/rejoined every few seconds -- FirstAt
+     compared session addresses, but the extra is added at his memberJoin's sender
+     address (10.0.0.1:1000), never his first's, so the new rule removed him and PC2
+     resent memberJoin. Now g_beside maps each extra's XUID to his first's (recorded
+     in HandleMemberJoin) and FirstAt looks the first up by XUID. In both kits,
+     NOT yet tested.
   6. connectResponse: covered by per-client ports (server replies to the sender's
      port; ReceivedFor/PacketForAnother) -- nothing to do unless a test says so.
   7. Then: release build + kits for both PCs, final docs, push the branch to origin

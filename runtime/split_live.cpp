@@ -179,8 +179,10 @@ namespace
     }
 
     // The players of other machines beside their first, as this machine hosts
-    // them.
-    std::set<uint64_t> g_beside;
+    // them, each with his machine's first player's XUID: the address a player
+    // beside the first is added with is what his memberJoin came from, which
+    // need not be the one the first is registered at.
+    std::map<uint64_t, uint64_t> g_beside;
 
     // One of this machine's players beside the first, or another machine's.
     bool Beside(uint32_t party, int32_t index)
@@ -193,17 +195,12 @@ namespace
         return g_beside.count(xuid) != 0;
     }
 
-    // The first player of the machine a member plays on: the member at his
-    // address who is not beside another, or -1.
+    // The first player of the machine one of another machine's players beside
+    // its first plays on, or -1.
     int32_t FirstAt(uint32_t party, uint32_t index)
     {
-        const uint32_t at = AddressOf(party, index);
-        if (!at) return -1;
-        for (uint32_t i = 0; i < T_SESSION_SLOTS; i++)
-            if (i != index && *GuestPtr<uint8_t>(Member(party, i)) >= kInParty && !Beside(party, int32_t(i)) &&
-                std::memcmp(GuestPtr<uint8_t>(AddressOf(party, i)), GuestPtr<uint8_t>(at), 12) == 0)
-                return int32_t(i);
-        return -1;
+        const auto first = g_beside.find(XuidAt(party, index));
+        return first == g_beside.end() ? -1 : MemberOf(party, first->second);
     }
 
     // A slot nobody has in the party or its session, or -1.
@@ -846,7 +843,7 @@ GUEST_HOOK(T_PartyHost_HandleMemberJoin)
         GUEST_ORIG(T_PartyHost_HandleMemberJoin)(ctx, base);
         return;
     }
-    g_beside.insert(xuid);
+    g_beside[xuid] = XuidAt(party, uint32_t(at));
     // His machine's joinParty reserved a slot for its first player alone: one
     // more, under the challenge he brings, as joinParty reserves them.
     const int32_t slot = FreeSlot(party);
