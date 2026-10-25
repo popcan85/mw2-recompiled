@@ -339,7 +339,78 @@
 // member), the first there from that member on, which two wrappers ask from
 // member 0 (sub_8219C8E8, sub_8219C918).
 #define T_Party_FindMemberByAddr  8219C818
-#define T_SV_InitHunk             822BF890
+// More of a party: active (in a party at all) at +5352, taking memberJoin
+// messages at +5356, and at +5368 a byte the host's own member is given at +1.
+// A member was last heard from at +52 (Sys_Milliseconds); PartyHost_
+// TimeoutMembers(party) removes one 12 seconds quiet, unless his XUID is
+// signed in here (Live_XuidIsLocal). PartyHost_AddLocalPlayer(party,
+// controller, slot) fills a member from a controller's own profile -- name,
+// clan tag, rank, XUID -- and registers him in the party's session, as the
+// host is put in his own party; Party_MemberChanged(party, slot) brings the
+// party state up to date after a member is written. Party_RefreshLocalMembers
+// (controller, party) gives every member signed in here that controller's
+// name and this machine's 8 bytes. A machine in a party it does not host
+// sends memberJoin: Party_SendMemberJoin(party, controller, host address,
+// token, xuid, name, clan tag; the rest from the controller's profile). The
+// host's PartyHost_HandleMemberJoin(party, ?, from, msg) adds the XUID its
+// argv[2] names, unless the member at the sender's address has it already.
+// Live_ProfileName, Live_Xuid and Party_ClanTag take a controller.
+#define T_PARTY_ACTIVE            5352u
+#define T_PARTY_TAKING_MEMBERS    5356u
+#define T_PARTY_LOCAL_DETAIL      5368u
+#define T_MEMBER_HEARD            52u
+#define T_PartyHost_TimeoutMembers 821A49D0
+#define T_PartyHost_AddLocalPlayer 821A44A0
+#define T_Party_MemberChanged     821A1870
+#define T_Party_RefreshLocalMembers 821A30D8
+#define T_Party_SendMemberJoin    82198798
+#define T_PartyHost_HandleMemberJoin 821A6F48
+#define T_Live_XuidIsLocal        823380C0
+#define T_Live_ProfileName        82337B00
+#define T_Live_Xuid               8233B648
+#define T_Party_ClanTag           82194500
+// The rest of a member PartyHost_AddLocalPlayer fills from the controller's
+// stats, which a player who just joined does not have read in yet: +124 from
+// T_Member_Detail124(controller), and +148, +152 and +156 (the rank among
+// them) each from a reader of the controller's stats and a table lookup.
+#define T_Member_Detail124        82338388
+#define T_Member_Stat148          82338448
+#define T_Member_Table148         8239D378
+#define T_Member_Stat152          823384B0
+#define T_Member_Table152         8239D1A8
+#define T_Member_Stat156          82338518
+#define T_Member_Table156         8239D4D0
+// The frame's last 2D drawing, the menus' and the console's (sub_82179370,
+// called by the screen update between its begin- and end-frame calls), and
+// what draws text: R_RegisterFont(name, imageTrack) -> font (its pixel height
+// at +4), R_TextWidth(text, maxChars, font) in pixels at scale 1, and
+// R_AddCmdDrawText(text, maxChars, font, x, y, xScale, yScale, rotation; in the
+// parameter area the colour (4 floats) at +84 and the style at +92).
+#define T_CL_DrawScreen2D         82179370
+#define T_R_RegisterFont          823C2798
+#define T_R_TextWidth             823C2808
+#define T_R_AddCmdDrawText        823C7690
+#define T_DATA_NormalFontName     0x82050660u   // "fonts/normalfont"
+// Material_RegisterHandle(name, imageTrack) -> material, for R_DrawStretchPic
+// (the colour at +84 of its parameter area, the material at +92).
+#define T_Material_RegisterHandle 823C2FF8
+// Each controller's multiplayer stats (unlock_all.cpp), 25136 bytes a
+// controller, two copies of 8196 bytes in it: a CRC-32 of the rest, then the
+// 8188-byte buffer the stats file holds (launcher/playerdata_layout.h's
+// offsets, values low byte first). The reset ("No stats found, zeroing out
+// stats buffer", sub_8227D998) stores the CRC as Crc32(buffer, 8188, 0).
+#define T_DATA_Stats              0x830D7DF4u
+#define T_STATS_STRIDE            25136u
+#define T_STATS_COPY              8196u
+#define T_STATS_READ              8192u   // past the first copy's buffer: stats are in
+#define T_STATS_WRITE_NEEDED      8193u   // and are to be written ("no statWriteNeeded")
+#define T_Crc32                   82379A40
+// The menus' isItemUnlocked(localClientNum, args, result, ?): with
+// cl_multi_gamepads_enabled set and the client not in a game (connection
+// state under 5) it answers locked, for split screen's menus to ask
+// isItemUnlockedSplitScreen instead.
+#define T_UI_IsItemUnlocked       822D1440
+#define T_SV_InitHunk            822BF890
 #define T_DATA_SvRunningDvar      0x830F08E4u   // pointer to the dvar, a bool at +12
 #define T_Hunk_Alloc              82312FF8
 #define T_memset                  8241A890

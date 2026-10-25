@@ -250,18 +250,44 @@ of this machine in an Xbox LIVE party and match through it:
 - The players the sign-in screen puts at the second to fourth controllers are
   signed in to Live, each under his own profile's XUIDs (`0x0009` and
   `0xE0...` over its digits), with the privileges of the first.
-- In the Xbox LIVE lobby this machine hosts, START at such a controller joins:
-  the sign-in screen opens first if nobody is signed in there, and choosing a
-  profile joins. Joining runs the split-screen menu's own
+- In an Xbox LIVE lobby, hosted here or joined, START at such a controller
+  joins: the sign-in screen opens first if nobody is signed in there, and
+  choosing a profile joins. Joining runs the split-screen menu's own
   `makeLocalClientActive` as that controller, with every controller routed to
   its own client (`cl_multi_gamepads_enabled`). Holding Back for two seconds,
-  or signing out, leaves (`makeLocalClientInactive`).
+  or signing out, leaves (`makeLocalClientInactive`), and a player who leaves
+  is signed out: START signs in again, as any profile. Over the lobby, at the
+  lower right, a line for each connected controller nobody plays at says to
+  press START to join, and one for each player who joined says to hold Back
+  to leave; with more than one player of this machine in, a controller and
+  its number stand left of each one's row of the lobby's list. A controller
+  that has its client already (its player went out of Xbox LIVE and came
+  back) is not given `makeLocalClientActive` again, which would be split
+  screen's sign-in finishing and open its game setup; going out of Xbox LIVE
+  makes the players beside the first leave. The menus' `isItemUnlocked`, which
+  answers locked before a game while the controllers are routed for split
+  screen, is asked with them not routed, so Create a Class and the rest open
+  as for one player.
 - A player who joins is added to the parties this machine hosts as the host
-  adds a machine that joins (`PartyHost_AddPlayerAtSlot`): this machine's
-  address, his own name and XUID, the first player's other details. The lobby
-  lists him, other machines are sent him with the party, and the party's
-  session registers him. The title's party already knows a member may be
-  local: its timeout spares one whose XUID is signed in on this machine.
+  puts himself in his own (`PartyHost_AddLocalPlayer`, from his controller's
+  profile: name, clan tag, rank, XUID). The lobby lists him, other machines
+  are sent him with the party, and the party's session registers him. The
+  title's party already knows a member may be local: its timeout spares one
+  whose XUID is signed in on this machine. The title gives every member signed
+  in here the name of one controller each frame (`Party_RefreshLocalMembers`);
+  the other players here sit out the call. A player is in the party before
+  the title has read his stats in; the details taken from them, his rank among
+  them, are made his stats' each frame after.
+- In a party another machine hosts, a player who joins is sent to the host
+  with the title's own `memberJoin`, from his controller, once the party lists
+  the first player, and again every three seconds until it lists him. The
+  host's handler adds a XUID the member at the sender's address does not have,
+  with that address; the host then keeps him as one of that machine's players
+  beside its first: the member found for what the machine sends is its first
+  player, he is heard from whenever the first is (the party's 12-second
+  timeout), and he is put in each party the host hosts that has the first.
+  Leaving there takes effect on that machine alone: the host keeps him until
+  the machine leaves the party.
 - The local clients' setup reads `splitscreen` from a copy of the dvar that
   says set, and makes four; the real dvar is untouched, and the server's hunk,
   sized in the same setup, reads the real one (sv_maxclients' room). Each
@@ -272,7 +298,8 @@ of this machine in an Xbox LIVE party and match through it:
   registered beside him, in free slots.
 
 Two players on one machine then play a private match it hosts, in the
-title's own split screen. The log names who is at each controller, the
+title's own split screen, and a machine that joins the lobby can bring a
+second player the same way. The log names who is at each controller, the
 controllers' routing, the active clients and their connection states as they
 change, each registration, and every session message with its words
 (`XSessionJoinRemote` lists the XUIDs it adds).

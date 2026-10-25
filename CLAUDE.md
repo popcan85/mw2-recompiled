@@ -66,17 +66,51 @@ system-link split-screen; report approach, risks, odds.
   and every client active); START that joins is hidden until released. Private match:
   split screen, both playable, player 2's name right in game.
   Build for testing: `builds\stage2c-diagnostic\` (diagnostic: MW2_ENGINE_LOG=1, LOG_TIME).
-  OPEN, next session:
-  1. Lobby name flips "Player 2" -> "Reido" ~40 ms after player 2 joins the lobby party
-     (party 825B5C18, his slot 0, host slot 7), right after "Session Join completed" for
-     him in gameSession. Suspect the join-complete callback sub_823915C0 -> sub_821A6578
-     (refreshes the host's member with sub_821A44A0 and syncs linked party +5464 members).
-     Find the writer: hook T_I_strncpyz / AddPlayerAtSlot and log writes to member+2 with
-     the caller's LR (watchpoint.cpp is Linux-only).
-  2. Rank/details of player 2 are copied from player 1; sub_821A44A0(party, controller,
-     slot) fills a member from a controller's own profile, but also writes party+5368.
-  3. Joining from PC2 with 2 players (joinParty carries one player a machine).
-  4. Release build + test kit for both PCs; docs for the final UX; push at stage end.
+  Session 2026-10-24 (stage 2d, UNCOMMITTED until the user's two-PC test):
+  - Name flip found: Party_RefreshLocalMembers (821A30D8) writes the given controller's
+    gamertag into EVERY member signed in here; hook puts each member's own name back.
+  - Local players now added with PartyHost_AddLocalPlayer (821A44A0, own profile: rank
+    etc.), party+5368 saved/restored.
+  - PC2 with 2 players: party commands table 0x82020848 (joinParty, memberJoin, rank...).
+    PC2 resends the title's memberJoin (Party_SendMemberJoin 82198798, token/address
+    recorded from the first player's) for controller 2 once the party lists player 1.
+    Host's memberJoin handler adds a XUID differing from the member at that address;
+    hook marks it g_beside (FindMemberByAddr skips it unless alone; timeout +52 copied
+    from his machine's first; CopyBeside puts him in the other hosted party).
+    joinParty removes all members at an address (so a rejoin clears both).
+  - Kits: `builds\stage2d-two-pc\` (PC1) and `builds\stage2d-pc2-files\` (copy the two
+    files into PC2's pc2-kit; PC2 was offline). Both diagnostic builds.
+  - User confirmed on PC1: names distinct in lobby and in game. FOCUS: polish the one-PC
+    experience before any two-PC test (user's call).
+  - Join prompts: hook CL_DrawScreen2D (82179370, last 2D draw of the frame), draw with
+    R_AddCmdDrawText/normalfont at lower right: "Controller N: press START to join" for
+    connected (pad read <1 s ago) unjoined controllers, "<name>: hold BACK to leave".
+    Built into `builds\stage2d-two-pc\`; NOT yet seen by the user (placement/size guesses).
+  - User confirmed the join prompts work.
+  - MW2_UNLOCK_ALL=1 (runtime/unlock_all.cpp, called each frame from input.cpp): each
+    controller's in-memory stats (0x830D7DF4 + c*25136, two copies of 8196: CRC + 8188
+    buffer) get the launcher's RANK 70 max + UNLOCK EVERYTHING when version/format match
+    and experience != max; CRC redone with sub_82379A40. In the PC1 kit's launch.bat.
+    Saves backed up to `builds\saves-backup-2026-10-24\`. NOT yet tested by the user.
+  - User test: unlock works in memory (rank 70) but "Not uploading stats: no
+    statWriteNeeded" -> now set stats+8193 after unlocking. CAC greyed in private lobby:
+    isItemUnlocked (822D1440) says locked when cl_multi_gamepads_enabled && conn<5 ->
+    hooked, multi cleared for the call. Split Screen Setup opened when START rejoined a
+    controller still mapped (makeLocalClientActive on a mapped controller = sub_821AC0E0,
+    "closemenu menu_splitscreensignin; openmenu menu_gamesetup_splitscreen") -> Join skips
+    it when mapped; leaving Xbox LIVE now runs Leave + multi=0. Name refresh ran every
+    frame (our post-fix churned) -> other local members set to status 2 during the call.
+    Controller icons (xenon_controller_top + number) left of local rows: rows guessed
+    from the screenshot (x 807, first row y 111, step 30 at 1280x720; party1 slot order).
+    All in `builds\stage2d-two-pc\`, NOT yet tested.
+  - User: all good but P2 rank 1 after restart. Cause: member made 4 ms before his stats
+    download (stats were saved at 70). KeepDetails refreshes member +124/+148/+152/+156
+    from the AddLocalPlayer readers each frame. Leave now signs out (signin::SignOut).
+    Sign-in screen: New profile opens an on-screen keyboard (suggested name), X renames a
+    listed profile (RenameLocked rewrites profiles.txt). Player 1 rename: not in game yet.
+    In `builds\stage2d-two-pc\`, NOT yet tested.
+  OPEN: user's two-PC test (next); leaving on PC2 is local only (host keeps him until PC2
+  leaves); then release build + kits, final docs, commit, push.
 - Never propose one game copy per player: the user wants native split screen only.
 - Diagnostic Windows builds needed `pthread` linked on Windows (clock_gettime).
 - New test builds can reuse an installed `game\` folder (junctions to stage0-stock);

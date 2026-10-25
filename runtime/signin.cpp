@@ -36,7 +36,8 @@ namespace
 {
     using namespace signin;
 
-    constexpr uint16_t kUp = 0x0001, kDown = 0x0002, kStart = 0x0010, kA = 0x1000, kB = 0x2000, kX = 0x4000;
+    constexpr uint16_t kUp = 0x0001, kDown = 0x0002, kLeft = 0x0004, kRight = 0x0008, kStart = 0x0010, kA = 0x1000,
+                       kB = 0x2000, kX = 0x4000, kY = 0x8000;
     constexpr uint32_t XN_SYS_UI = 0x00000009, XN_SYS_SIGNINCHANGED = 0x0000000A;
 
     struct Profile { uint64_t id; std::string name; };
@@ -57,6 +58,23 @@ namespace
     std::vector<Item> g_items;
     int g_focus = 0;
     std::atomic<uint64_t> g_version{ 0 };
+
+    // The keyboard a name is written on: five rows of letters, digits and
+    // marks, and a row of SPACE, DELETE and DONE. While it is up, the list
+    // waits beneath it.
+    constexpr const char* kKeys[] = { "ABCDEFGHIJKLM", "NOPQRSTUVWXYZ", "abcdefghijklm", "nopqrstuvwxyz",
+                                      "0123456789-_." };
+    constexpr int kKeyRows = 5, kKeyColumns = 13, kActions = 3;   // the actions' row is kKeyRows
+    constexpr const char* kActionNames[kActions] = { "SPACE", "DELETE", "DONE" };
+    constexpr size_t kNameLength = 15;   // a gamertag's longest
+    struct Naming
+    {
+        bool up = false;
+        Item item;          // a new profile, or the one named again
+        std::string text;
+        int row = 0, column = 0;
+    };
+    Naming g_naming;
 
     // The controllers, as last read.
     uint16_t g_held[kUsers]{};
@@ -187,16 +205,22 @@ namespace
     }
 
     // "Player 2", or the first number after it nobody has.
-    Profile NewProfile()
+    std::string SuggestedName()
+    {
+        const std::vector<Profile> profiles = Profiles();
+        for (int number = 2; ; number++)
+        {
+            const std::string name = "Player " + std::to_string(number);
+            if (std::none_of(profiles.begin(), profiles.end(), [&](const Profile& p) { return p.name == name; }))
+                return name;
+        }
+    }
+
+    Profile NewProfile(const std::string& name)
     {
         const std::vector<Profile> profiles = Profiles();
         Profile made;
-        for (int number = 2; ; number++)
-        {
-            made.name = "Player " + std::to_string(number);
-            if (std::none_of(profiles.begin(), profiles.end(), [&](const Profile& p) { return p.name == made.name; }))
-                break;
-        }
+        made.name = name;
         Book book;
         book.profiles = profiles;
         made.id = NewId(book);
@@ -209,6 +233,18 @@ namespace
         out << line;
         if (!out) LOGE("signin: cannot write %s", File().string().c_str());
         return made;
+    }
+
+    // A profile named again in the file, and for whoever plays as it.
+    void RenameLocked(uint64_t id, const std::string& name)
+    {
+        Book book = Read();
+        for (Profile& profile : book.profiles)
+            if (profile.id == id) profile.name = name;
+        Write(book);
+        for (Player& player : g_players)
+            if (player.signedIn && player.id == id) player.name = name;
+        if (g_first.id == id) g_first.name = name;
     }
 
     uint32_t MaskLocked()
@@ -238,12 +274,7 @@ namespace
         case Item::Existing:
             chosen = { true, item.profile.id, item.profile.name };
             break;
-        case Item::New:
-        {
-            const Profile made = NewProfile();
-            chosen = { true, made.id, made.name };
-            break;
-        }
+        case Item::New:   // named first (FinishNaming), never chosen as it is
         case Item::SignOut:
             break;
         }
@@ -252,6 +283,89 @@ namespace
         ShutLocked();
         kernel::PostNotification(XN_SYS_SIGNINCHANGED, MaskLocked());
     }
+    // The keyboard up for a new profile's name, or another for one there is.
+    void StartNaming(const Item& item)
+    {
+        g_naming = {};
+        g_naming.up = true;
+        g_naming.item = item;
+        g_naming.text = item.what == Item::New ? SuggestedName() : item.profile.name;
+        g_naming.row = kKeyRows;
+        g_naming.column = 2;   // DONE: the name suggested is a name already
+        g_version++;
+    }
+
+    // DONE: a new profile made and signed in, or the one named again, back in
+    // the list.
+    void FinishNaming()
+    {
+        std::string name = g_naming.text;
+        while (!name.empty() && name.back() == ' ') name.pop_back();
+        while (!name.empty() && name.front() == ' ') name.erase(name.begin());
+        if (name.empty()) return;   // a profile has a name
+        g_naming.up = false;
+        g_version++;
+        if (g_naming.item.what == Item::New)
+        {
+            const Profile made = NewProfile(name);
+            LOGI("signin: a new profile, %s", made.name.c_str());
+            ChooseLocked({ Item::Existing, made, made.name });
+            return;
+        }
+        RenameLocked(g_naming.item.profile.id, name);
+        LOGI("signin: profile %012llx is %s now", (unsigned long long)g_naming.item.profile.id, name.c_str());
+        for (Item& item : g_items)
+            if (item.what == Item::Existing && item.profile.id == g_naming.item.profile.id)
+                item.profile.name = item.label = name;
+    }
+
+    // The keyboard, driven by the controller that asked: the d-pad moves, A
+    // presses the key, X deletes, Y is a space, START is DONE, B goes back to
+    // the list.
+    void NamingInput(uint16_t pressed)
+    {
+        Naming& n = g_naming;
+        const int before = n.row, beforeColumn = n.column;
+        if (pressed & kRight) n.column = (n.column + 1) % (n.row == kKeyRows ? kActions : kKeyColumns);
+        if (pressed & kLeft)
+        {
+            const int width = n.row == kKeyRows ? kActions : kKeyColumns;
+            n.column = (n.column + width - 1) % width;
+        }
+        if (pressed & (kUp | kDown))
+        {
+            const int row = (n.row + ((pressed & kDown) ? 1 : kKeyRows)) % (kKeyRows + 1);
+            if (row == kKeyRows && n.row != kKeyRows) n.column = std::min(n.column * kActions / kKeyColumns, kActions - 1);
+            else if (row != kKeyRows && n.row == kKeyRows) n.column = n.column * kKeyColumns / kActions + 2;
+            n.row = row;
+        }
+        bool changed = n.row != before || n.column != beforeColumn;
+        auto type = [&](char c) {
+            if (n.text.size() < kNameLength) n.text += c;
+            changed = true;
+        };
+        auto erase = [&] {
+            if (!n.text.empty()) n.text.pop_back();
+            changed = true;
+        };
+        if (pressed & kA)
+        {
+            if (n.row < kKeyRows) type(kKeys[n.row][n.column]);
+            else if (n.column == 0) type(' ');
+            else if (n.column == 1) erase();
+            else FinishNaming();
+        }
+        if (pressed & kX) erase();
+        if (pressed & kY) type(' ');
+        if (pressed & kStart) FinishNaming();
+        if (pressed & kB)
+        {
+            n.up = false;
+            changed = true;
+        }
+        if (changed) g_version++;
+    }
+
     void OpenLocked(uint32_t user)
     {
         // The first controller's player is the online service's.
@@ -270,6 +384,7 @@ namespace
         g_items.push_back({ Item::New, {}, "New profile" });
         if (current.signedIn) g_items.push_back({ Item::SignOut, {}, "Sign out" });
         g_focus = 0;
+        g_naming = {};
         g_open = true;
         g_version++;
         LOGI("signin: the screen opens for controller %u, %zu entries", g_asking, g_items.size());
@@ -328,15 +443,33 @@ bool signin::Input(uint32_t user, uint16_t buttons)
         }
         return g_swallow[user];
     }
-    if (user == g_asking)
+    if (user == g_asking && g_naming.up)
+        NamingInput(pressed);
+    else if (user == g_asking)
     {
         const int count = int(g_items.size());
+        const Item& focused = g_items[g_focus];
         if (pressed & kDown) { g_focus = (g_focus + 1) % count; g_version++; }
         if (pressed & kUp)   { g_focus = (g_focus + count - 1) % count; g_version++; }
-        if (pressed & kA) ChooseLocked(Item(g_items[g_focus]));
+        if (pressed & kA)
+        {
+            if (focused.what == Item::New) StartNaming(focused);
+            else ChooseLocked(Item(focused));
+        }
+        else if ((pressed & kX) && focused.what == Item::Existing) StartNaming(focused);
         else if (pressed & kB) ShutLocked();
     }
     return true;
+}
+
+void signin::SignOut(uint32_t user)
+{
+    if (user == 0 || user >= kUsers) return;
+    std::lock_guard lock(g_lock);
+    if (!g_players[user].signedIn) return;
+    LOGI("signin: controller %u signs out (%s)", user, g_players[user].name.c_str());
+    g_players[user] = {};
+    kernel::PostNotification(XN_SYS_SIGNINCHANGED, MaskLocked());
 }
 
 #ifdef MW2_SIGNIN_PICTURE
@@ -439,6 +572,39 @@ bool signin::Picture(uint32_t windowHeight, Image& image)
         (current.signedIn ? ", signed in as " + current.name : "");
     Text(image, g_small, float(at(29)), float(at(64)), kDim, who);
 
+    if (g_naming.up)
+    {
+        // The name, then the keys: 13 columns of 30 from x 30, rows of 32
+        // from y 136, and the actions' row beneath, a third of the width each.
+        const Naming& n = g_naming;
+        Fill(image, at(28), at(88), int(width) - at(28), at(126), kBar);
+        float end = Text(image, g_entry, float(at(38)), float(at(91)), kWhite, n.text);
+        if (n.text.size() < kNameLength) Text(image, g_entry, end, float(at(91)), kAmber, "_");
+        for (int row = 0; row < kKeyRows; row++)
+            for (int column = 0; column < kKeyColumns; column++)
+            {
+                const int x = at(30.0f + 30.0f * float(column)), y = at(136.0f + 30.0f * float(row));
+                const bool focused = n.row == row && n.column == column;
+                if (focused) Fill(image, x, y, x + at(28), y + at(28), kAmber);
+                Text(image, g_small, float(x + at(8)), float(y + at(4)), focused ? kBar : kWhite,
+                     std::string(1, kKeys[row][column]));
+            }
+        for (int action = 0; action < kActions; action++)
+        {
+            const int x = at(30.0f + 130.0f * float(action)), y = at(288);
+            const bool focused = n.row == kKeyRows && n.column == action;
+            Fill(image, x, y, x + at(126), y + at(28), focused ? kAmber : kBar);
+            Text(image, g_small, float(x + at(12)), float(y + at(4)), focused ? kBar : kWhite, kActionNames[action]);
+        }
+        float x = Text(image, g_small, float(at(28)), float(at(326)), kAmber, "X");
+        x = Text(image, g_small, x, float(at(326)), kDim, " Delete   ");
+        x = Text(image, g_small, x, float(at(326)), kAmber, "START");
+        x = Text(image, g_small, x, float(at(326)), kDim, " Done   ");
+        x = Text(image, g_small, x, float(at(326)), kAmber, "B");
+        Text(image, g_small, x, float(at(326)), kDim, " Back");
+        return true;
+    }
+
     // Six entries are seen at once; the list follows the one chosen.
     constexpr int kSeen = 6;
     const int count = int(g_items.size());
@@ -457,7 +623,12 @@ bool signin::Picture(uint32_t windowHeight, Image& image)
     if (first > 0) Text(image, g_small, float(width) - float(at(40)), float(at(84)), kDim, "...");
     if (first + kSeen < count) Text(image, g_small, float(width) - float(at(40)), float(at(318)), kDim, "...");
     float x = Text(image, g_small, float(at(28)), float(at(326)), kAmber, "A");
-    x = Text(image, g_small, x, float(at(326)), kDim, "  Select      ");
+    x = Text(image, g_small, x, float(at(326)), kDim, "  Select     ");
+    if (g_items[g_focus].what == Item::Existing)
+    {
+        x = Text(image, g_small, x, float(at(326)), kAmber, "X");
+        x = Text(image, g_small, x, float(at(326)), kDim, "  Rename     ");
+    }
     x = Text(image, g_small, x, float(at(326)), kAmber, "B");
     Text(image, g_small, x, float(at(326)), kDim, "  Back");
 

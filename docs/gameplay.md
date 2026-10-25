@@ -161,7 +161,11 @@ signs them in to Live instead, under their own profiles
 ([multiplayer.md](multiplayer.md#xbox-live-private-matches)).
 
 It lists the profiles of this machine that are not already playing, and "New
-profile", which makes "Player 2" or the next free number. A profile is signed in
+profile", which opens a keyboard with "Player 2" or the next free number
+written on it: the d-pad moves over the keys, A presses one, X deletes, Y is a
+space, START or DONE makes the profile with that name (15 characters at most)
+and B goes back to the list. X on a profile of the list opens the same
+keyboard to name it again. A profile is signed in
 locally (state 1) under the offline XUID `0xE000` over those digits; the title
 names its stats by that XUID and its settings are `profile_<digits>.bin`
 ([saves.md](saves.md)). The launcher's PROFILES screen renames one, and puts one

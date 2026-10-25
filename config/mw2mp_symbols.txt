@@ -87,6 +87,21 @@
 8219C818  Party_FindMemberByAddr        # (name a guess) member scan, bounded [0,18); falls back to 8219C6D8
 8219C6D8  Party_FindMemberBySlotTotal   # (name a guess) fallback walk bounded by the slot total, not by 18
 
+# --- Party members (split_live.cpp) ---
+821A6048  PartyHost_AddPlayerAtSlot     # prints "Adding player %llx at slot %i at address %s"
+821A46E0  PartyHost_RemoveMember        # prints "Removing player at slot %i (xuid is %llx) for this reason: %s"
+821A44A0  PartyHost_AddLocalPlayer      # (name a guess) member from a controller's profile; Session_RegisterUser; sets party+5368
+821A49D0  PartyHost_TimeoutMembers      # prints "[%i] Party member '%s' ( slot %i ) timed out"; 12 s, spares local XUIDs
+821A30D8  Party_RefreshLocalMembers     # (name a guess) every member signed in here gets one controller's name
+821A1870  Party_MemberChanged           # (name a guess) after a member is written: party state time, teams, UI
+82198798  Party_SendMemberJoin          # formats "%imemberJoin %s %s %s" and the member's profile, NET_OutOfBandData
+821A6F48  PartyHost_HandleMemberJoin    # the memberJoin handler (party command table at 0x82020848)
+821A6950  PartyHost_HandleJoinPartyRequest # the joinParty handler; removes every member at the sender's address
+823380C0  Live_XuidIsLocal              # (name a guess) the XUID is signed in on this machine
+82337B00  Live_ProfileName              # controller -> name, 104 bytes a controller from 0x839C4504
+8233B648  Live_Xuid                     # (name a guess) controller -> XUID
+82194500  Party_ClanTag                 # (name a guess) controller -> clan tag
+
 # --- UI / HUD ---
 822F0230  UI_ReplaceDirective           # 256-byte directive-name stack buffer, unbounded
 822F0140  UI_LookupDirective            # resolves a directive name to a value

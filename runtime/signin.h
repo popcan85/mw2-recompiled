@@ -16,7 +16,9 @@
 // The console signs a profile in at each controller through its own sign-in
 // screen, which a title asks for (XamShowSigninUI) and never draws. This is
 // that screen: the profiles of this machine (saves/profiles.txt), a new one,
-// or nobody. The console's also signs a guest in beside a player on Live;
+// or nobody. A new profile is named on the screen's keyboard first, and X
+// names the profile chosen again. The console's also signs a guest in beside a
+// player on Live;
 // this one signs in local profiles, which XAM puts on Live only with
 // MW2_SPLIT_LIVE (kernel/xam.cpp). Nothing is
 // remembered between runs: every controller but the first starts signed
@@ -52,6 +54,8 @@ namespace signin
     // it is open.
     void AskFor(uint32_t user);
     bool Open();
+    // Signs the player at controller 1, 2 or 3 out, as choosing "Sign out" does.
+    void SignOut(uint32_t user);
 
     // What a controller holds, at every read of it (XINPUT_GAMEPAD buttons,
     // a stick pushed up or down counted as the d-pad, and kGuide). True when

@@ -150,6 +150,14 @@ left, by BACK or by the window closing; a file already holding what was chosen
 is not written, nor copied to its backup. With the game running nothing is
 written, since it writes its own copy as it ends.
 
+`MW2_UNLOCK_ALL=1` makes the change of RANK 70 (to the end of its experience)
+and UNLOCK EVERYTHING in the game instead (`runtime/unlock_all.cpp`), to every
+controller's stats once the title has read them in: each controller keeps two
+copies of the file's CRC and buffer from 0x830D7DF4, 25136 bytes a controller.
+A copy of the known layout whose experience is short of the most is changed,
+and its CRC made again with the title's CRC-32. The title saves it as it saves
+any stats.
+
 The title's own console commands are the check on a change: `dumpPlayerData`
 prints the whole buffer by name as the title reads it, `setPlayerData` and
 `getPlayerData` take a path into it, `uploadStats` writes the file
