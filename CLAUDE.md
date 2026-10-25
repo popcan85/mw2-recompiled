@@ -186,7 +186,11 @@ system-link split-screen; report approach, risks, odds.
   NEXT SESSION (stage 2 polish; current builds: PC1 `builds\stage2d-two-pc\launch.bat`,
   PC2 `\\192.168.0.144\mw2\builds\pc2-kit\launch-stage2d.bat`, both diagnostic, both
   launchers swap in a `*-new.exe` placed beside a running exe):
-  1. User to confirm the reconnect fix and the icons-under-popups fix.
+  1. Reconnect fix CONFIRMED by the user. Glyphs (prompts + controller icons) were
+     gone from the lobby: 822EE7F0 is Menu_IsVisible (also used for the blur), not
+     Menu_Paint, so they drew before the lobby painted over them. Hook moved to the
+     real Menu_Paint 822F1E80 (menu-stack loop 822F3F58, names checked in ui_mp.ff).
+     In both kits as `*-new.exe` (swapped in at launch); NOT yet tested.
   2. Leaving on PC2 (Back held) is local only: the host keeps the player until PC2
      leaves -> tell the host (e.g. a custom OOB, or the title's own member leave).
   3. Controller icons in a joining PC's lobby (only the host draws rows from party1;

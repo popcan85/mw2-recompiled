@@ -422,7 +422,8 @@
 #define T_CL_DrawScreen2D         82179370
 // Menu_Paint(dc, menu) draws one open menu, the menu's name at +0; the menus
 // open above it (popups, with their darkening of what is beneath) after it.
-#define T_UI_MenuPaint            822EE7F0
+// (822EE7F0, which it calls first, only says whether the menu is visible.)
+#define T_UI_MenuPaint            822F1E80
 #define T_R_RegisterFont          823C2798
 #define T_R_TextWidth             823C2808
 #define T_R_AddCmdDrawText        823C7690
