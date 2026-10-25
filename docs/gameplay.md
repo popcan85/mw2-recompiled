@@ -169,7 +169,9 @@ keyboard to name it again. A profile is signed in
 locally (state 1) under the offline XUID `0xE000` over those digits; the title
 names its stats by that XUID and its settings are `profile_<digits>.bin`
 ([saves.md](saves.md)). The launcher's PROFILES screen renames one, and puts one
-at the first controller.
+at the first controller. The Guide button at the first controller opens the
+screen with that player's profile alone, which A or X names again; the
+title's own copy of the gamertag, taken at sign-in, is renamed with it.
 
 The screen opens for the controller pressed last, since the call does not say
 which. While it is open the title reads every controller as idle and hears
