@@ -358,8 +358,11 @@ It needs Windows 10 1803 or later, for the placeholder mapping of guest memory.
 
 ### OPTIMISE
 
-The graphics screen starts with PLAYERS ON THIS PC (1 to 4), TARGET FPS (the
-screen's rate until another is chosen) and OPTIMISE, which finds the sharpest
+The graphics screen starts with AUTOMATIC SETTINGS, above the settings set by
+hand. Its label names the players the settings below were chosen for while
+they are still the benchmark's ("AUTOMATIC SETTINGS: 4 PLAYERS"), and it opens
+a screen of its own: PLAYERS ON THIS PC (1 to 4), TARGET FPS (the screen's
+rate until another is chosen) and RUN BENCHMARK, which finds the sharpest
 RESOLUTION and ANTIALIASING that keep the target with that many players
 (`launcher/optimise.cpp`, `mw2-launcher --optimise [<players>]` from a
 terminal). It runs the multiplayer's benchmark (`MW2_BENCHMARK`) at one

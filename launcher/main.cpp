@@ -401,7 +401,9 @@ namespace
         Profile, Back, NextPlayer, Rename, PlayAs, Rank, Prestige, UnlockEverything, UnlockMissions, AllStars,
         CheckUpdate, InstallUpdate,
         // The graphics screen, and the next of what each of its entries sets.
-        Graphics, PlayersHere, TargetFps, Optimise, Fullscreen, AspectRatio, Resolution, Antialiasing, FpsLimit, Fov,
+        Graphics, Fullscreen, AspectRatio, Resolution, Antialiasing, FpsLimit, Fov,
+        // Its AUTOMATIC SETTINGS screen: the benchmark (launcher/optimise.h) and what it is for.
+        AutoSettings, PlayersHere, TargetFps, Optimise, AutoBack,
         // The maps screen; CUSTOM MAPS turned on asks first, on a screen of its own.
         Maps, CustomMaps, CustomMapsOn, CustomMapsCancel, PcGame,
         // and its maps: one shown at a time, put in or out of the game, removed after a question.
@@ -462,6 +464,7 @@ namespace
         bool gameRunning = false;       // looked up once a second while the profile screen shows
         bool reportScreen = false;
         bool graphicsScreen = false;
+        bool autoScreen = false;        // the graphics screen's AUTOMATIC SETTINGS, over it
         bool mapsScreen = false;
         bool mapsWarning = false;       // CUSTOM MAPS is to be turned on: what that lets in, first
         std::vector<maps::Map> mapList; // read when the screen opens and after each change
@@ -691,6 +694,7 @@ namespace
                 profileScreen = action == Action::Profile;
                 reportScreen = action == Action::Report;
                 graphicsScreen = action == Action::Graphics;
+                autoScreen = false;
                 mapsScreen = action == Action::Maps;
                 if (graphicsScreen) lastRealPlay = optimise::LastRealPlay();
                 mapsWarning = false;
@@ -798,6 +802,14 @@ namespace
                 settings::SetFpsLimit(last ? fpsLimits.front() : kept[1]);
                 break;
             }
+            case Action::AutoSettings:
+            case Action::AutoBack:
+                autoScreen = action == Action::AutoSettings;
+                lastRealPlay = optimise::LastRealPlay();
+                message.clear();
+                messageIsError = false;
+                focusPlaced = false;
+                break;
             case Action::PlayersHere:
             {
                 // The next number, and what OPTIMISE found for it, if it did.
@@ -809,11 +821,11 @@ namespace
                     settings::SetResolution(kept.ratio, kept.choice.row);
                     settings::SetMsaa(kept.choice.msaa);
                     if (kept.target > 0) settings::SetFpsLimit(kept.target);
-                    message = "Set up for " + std::to_string(players) + (players == 1 ? " player" : " players") + " as OPTIMISE found: " +
+                    message = "Set up for " + std::to_string(players) + (players == 1 ? " player" : " players") + " as the benchmark found: " +
                               optimise::Name(kept.ratio, kept.choice) + ", about " + std::to_string(int(kept.fps)) + " frames a second.";
                 }
                 else
-                    message = "OPTIMISE has not been run for " + std::to_string(players) + (players == 1 ? " player" : " players") +
+                    message = "The benchmark has not been run for " + std::to_string(players) + (players == 1 ? " player" : " players") +
                               " yet: the settings below stay as they are.";
                 messageIsError = false;
                 messageFocus = focus;
@@ -832,7 +844,7 @@ namespace
             {
                 if (GameRunning())
                 {
-                    message = "The game is running. Close it first: OPTIMISE starts it on its own.";
+                    message = "The game is running. Close it first: the benchmark starts it on its own.";
                     messageIsError = true;
                     messageFocus = focus;
                     break;
@@ -1128,8 +1140,8 @@ namespace
             return entries;
         }
 
-        // The graphics screen.
-        std::vector<Entry> GraphicsEntries() const
+        // The graphics screen's AUTOMATIC SETTINGS.
+        std::vector<Entry> AutoEntries() const
         {
             std::vector<Entry> entries;
             entries.reserve(kMostEntries);   // add() hands out pointers into it: it must not move
@@ -1149,23 +1161,23 @@ namespace
             add(Action::PlayersHere, "PLAYERS ON THIS PC " + std::to_string(players), "PLAYERS ON THIS PC",
                 "How many play split screen on this computer: now " + who + ". Choose to go to the next, 1 to 4."
                 "\n\nEvery player beside the first is a picture more to draw each frame, and the game's settings are "
-                "chosen as it starts, before anyone joins: set it to the most who will play this time. OPTIMISE finds "
+                "chosen as it starts, before anyone joins: set it to the most who will play this time. RUN BENCHMARK finds "
                 "the settings for that many, and choosing a number it has been run for puts its settings back.\n\n" +
                 (known ? "For " + who + ": " + optimise::Name(kept.ratio, kept.choice) + ", about " + std::to_string(int(kept.fps)) +
                              " frames a second."
-                       : "OPTIMISE has not been run for " + who + " yet."));
+                       : "The benchmark has not been run for " + who + " yet."));
             const int target = settings::TargetFps() ? settings::TargetFps() : screenFps;
             add(Action::TargetFps, "TARGET " + std::to_string(target) + " FPS", "TARGET FPS",
-                "The frame rate OPTIMISE aims for: now " + std::to_string(target) + ". This screen is " +
+                "The frame rate the benchmark aims for: now " + std::to_string(target) + ". This screen is " +
                 std::to_string(screenWidth) + "x" + std::to_string(screenHeight) + " and shows " + std::to_string(screenFps) +
                 " pictures a second, so " + std::to_string(screenFps) +
                 " is the most it can show, and the smoothest. Choose to go to the next."
-                "\n\nOPTIMISE keeps this with a tenth to spare where the computer can. Where it can't whatever the settings, "
+                "\n\nThe benchmark keeps this with a tenth to spare where the computer can. Where it can't whatever the settings, "
                 "it says so and keeps them sharp.");
             const std::string& last = lastRealPlay;
-            add(Action::Optimise, "OPTIMISE", "OPTIMISE",
+            add(Action::Optimise, "RUN BENCHMARK", "RUN BENCHMARK",
                 "Finds the sharpest RESOLUTION and ANTIALIASING that keep " + std::to_string(target) + " frames a second with " +
-                who + ", and sets them, with FPS LIMIT at " + std::to_string(target) + "."
+                who + ", and sets them on the graphics screen, with FPS LIMIT at " + std::to_string(target) + "."
                 "\n\nIt runs the multiplayer's benchmark a few times, about 40 seconds each, full screen, with nobody at "
                 "the controllers: the lightest settings first, to learn the most this computer manages, then sharper ones. "
                 "A resolution's shaders are compiled the first time it is tried. A few minutes in all." +
@@ -1173,12 +1185,49 @@ namespace
                                         std::to_string(int(kept.fps)) + " frames a second."
                                   : "") +
                 (last.empty() ? std::string() : "\n\n" + last + " A benchmark has nobody from other computers; a match "
-                                                "with more players, or hosting them, can run slower than it."))->shown.ruleAbove = false;
+                                                "with more players, or hosting them, can run slower than it."))->shown.ruleAbove = true;
+            add(Action::AutoBack, "BACK", "", "")->shown.ruleAbove = true;
+            return entries;
+        }
+
+        // The graphics screen.
+        std::vector<Entry> GraphicsEntries() const
+        {
+            std::vector<Entry> entries;
+            entries.reserve(kMostEntries);   // add() hands out pointers into it: it must not move
+            auto add = [&](Action action, std::string label, const char* heading, std::string text) {
+                Entry entry;
+                entry.shown.label = std::move(label);
+                entry.action = action;
+                entry.heading = heading;
+                entry.text = std::move(text);
+                entries.push_back(std::move(entry));
+                return &entries.back();
+            };
+            // Where the settings below came from: the benchmark, for the players
+            // set, while they are still what it chose.
+            const int players = settings::PlayersHere();
+            const std::string who = std::to_string(players) + (players == 1 ? " player" : " players");
+            optimise::Outcome kept;
+            const bool known = optimise::Decode(settings::Optimised(players), kept);
+            const bool chosen = known && kept.ratio == settings::AspectRatio() && kept.choice.row == settings::ResolutionRow() &&
+                                kept.choice.msaa == settings::Msaa() && (kept.target <= 0 || kept.target == settings::FpsLimit());
+            std::string upper = who;
+            for (char& c : upper) c = char(std::toupper(static_cast<unsigned char>(c)));
+            add(Action::AutoSettings, chosen ? "AUTOMATIC SETTINGS: " + upper : std::string("AUTOMATIC SETTINGS"), "AUTOMATIC SETTINGS",
+                std::string(chosen ? "Set by the benchmark for " + who + ": " + optimise::Name(kept.ratio, kept.choice) + ", about " +
+                                         std::to_string(int(kept.fps)) + " frames a second. Changing one of the settings below by hand "
+                                         "leaves them."
+                            : known ? "The settings below have been changed by hand since the benchmark chose them for " + who + "."
+                                    : "The benchmark has not been run for " + who + " yet.") +
+                    "\n\nChoose to set how many play on this computer and the frame rate to aim for, and to run the "
+                    "benchmark, which finds the sharpest settings that keep it.");
             const bool fullscreen = settings::Fullscreen();
-            add(Action::Fullscreen, std::string("FULLSCREEN ") + (fullscreen ? "ON" : "OFF"), "FULLSCREEN",
+            Entry* first = add(Action::Fullscreen, std::string("FULLSCREEN ") + (fullscreen ? "ON" : "OFF"), "FULLSCREEN",
                 std::string("Whether the game starts fullscreen: now ") + (fullscreen ? "it does, at the screen's own resolution." : "it starts in a window.") +
                 "\n\nChoose to switch it. While playing, F8 switches between the two."
                 "\n\nIt applies to the campaign and the multiplayer, from the next time either is started.");
+            first->shown.ruleAbove = true;
             const settings::Ratio ratio = settings::AspectRatio();
             add(Action::AspectRatio, std::string("ASPECT RATIO ") + settings::RatioName(ratio), "ASPECT RATIO",
                 std::string("The shape of the game's picture: now ") + settings::RatioName(ratio) +
@@ -1453,10 +1502,10 @@ namespace
                     settings::SetMsaa(optimised.choice.msaa);
                     if (optimised.target > 0) settings::SetFpsLimit(optimised.target);
                     settings::SetOptimised(optimised.players, optimise::Encode(optimised));
-                    message = optimise::Summary(optimised) + "\n\nRESOLUTION, ANTIALIASING and FPS LIMIT below are set to it.";
+                    message = optimise::Summary(optimised) + "\n\nRESOLUTION, ANTIALIASING and FPS LIMIT on the graphics screen are set to it.";
                 }
-                else if (result == setup::Result::Cancelled) message = "OPTIMISE was stopped. Nothing was changed.";
-                else message = "OPTIMISE could not finish: " + error;
+                else if (result == setup::Result::Cancelled) message = "The benchmark was stopped. Nothing was changed.";
+                else message = "The benchmark could not finish: " + error;
                 lastRealPlay = optimise::LastRealPlay();
                 // Back on OPTIMISE, which the message is shown on.
                 focus = std::max(0, messageFocus);
@@ -1559,14 +1608,14 @@ namespace
                     job->kind == Job::Kind::Install    ? "INSTALLING"
                     : job->kind == Job::Kind::Compile  ? "SHADERS"
                     : job->kind == Job::Kind::AddMap   ? "ADDING A MAP"
-                    : job->kind == Job::Kind::Optimise ? "OPTIMISING"
+                    : job->kind == Job::Kind::Optimise ? "BENCHMARK"
                                                        : "UPDATES",
                     "");
                 return entries;
             }
             if (profileScreen) return ProfileEntries();
             if (reportScreen) return ReportEntries();
-            if (graphicsScreen) return GraphicsEntries();
+            if (graphicsScreen) return autoScreen ? AutoEntries() : GraphicsEntries();
             if (mapsScreen) return MapsEntries();
             const bool installed = state == setup::State::Installed;
             std::error_code ec;
@@ -1749,7 +1798,9 @@ namespace
             else if ((app.profileScreen || app.graphicsScreen || app.mapsScreen || (app.reportScreen && !app.recording)) && pressed({ ImGuiKey_Escape, ImGuiKey_GamepadFaceRight }, false))
             {
                 sound::Play(sound::Clip::Click);
-                app.Do(app.mapsWarning ? Action::CustomMapsCancel : app.mapRemoving ? Action::RemoveMapNo : Action::Back);
+                app.Do(app.mapsWarning ? Action::CustomMapsCancel : app.mapRemoving ? Action::RemoveMapNo
+                       : app.autoScreen                   ? Action::AutoBack
+                                                          : Action::Back);
                 ImGui::EndFrame();
                 continue;
             }

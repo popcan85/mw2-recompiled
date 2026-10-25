@@ -282,7 +282,9 @@ system-link split-screen; report approach, risks, odds.
       Release build benchmark: 165 once (warm-up outlier), then 185 / 183.
     * builds\bench-test has its OWN shaders folder now (not stage0-stock's).
     * Installer repacked; setup-test updated in place (new launcher/exes).
-    NOT yet seen by the user: the graphics screen entries, the in-window job/progress.
+    User CONFIRMED OPTIMISE works well (2026-10-25). Graphics screen then reorganised: AUTOMATIC
+    SETTINGS entry (label names the players while the settings are still the benchmark's) opens
+    its own screen: PLAYERS ON THIS PC, TARGET FPS, RUN BENCHMARK. NOT yet seen by the user.
   Parked: split-screen performance (title lowers resolution/fidelity in split screen;
   GPU ~53%, ~130 fps); 3+ PCs untested (non-host PCs' extras seen by each other);
   merging upstream acd414a.
