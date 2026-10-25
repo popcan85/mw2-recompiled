@@ -284,7 +284,10 @@ system-link split-screen; report approach, risks, odds.
     * Installer repacked; setup-test updated in place (new launcher/exes).
     User CONFIRMED OPTIMISE works well (2026-10-25). Graphics screen then reorganised: AUTOMATIC
     SETTINGS entry (label names the players while the settings are still the benchmark's) opens
-    its own screen: PLAYERS ON THIS PC, TARGET FPS, RUN BENCHMARK. NOT yet seen by the user.
+    its own screen: PLAYERS ON THIS PC, TARGET FPS, RUN BENCHMARK. User CONFIRMED it looks good.
+  Session ended 2026-10-25 with the user very pleased; planning a LAN party. Open ideas:
+  CPU-side frame-rate ceiling (~180 fps at 4p), 3-4 players on a joining PC and 3+ PCs untested,
+  Pro Controller as a non-first controller (recheck), offering pieces upstream.
   Parked: split-screen performance (title lowers resolution/fidelity in split screen;
   GPU ~53%, ~130 fps); 3+ PCs untested (non-host PCs' extras seen by each other);
   merging upstream acd414a.
